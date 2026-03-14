@@ -1,214 +1,276 @@
 import React from "react";
-import { useParams, useNavigate } from "react-router";
-import { useState, useEffect } from "react";
+
+import { useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { Header } from "./Header";
 
-interface Project {
-  title: string;
-  description: string;
-  images: string[];
-}
-
-const projectsData: Record<string, Project> = {
-  "1": {
+const projects = [
+  {
+    id: 1,
     title: "Grow-Together",
-    description: "Excess food waste is a big challenge for everyone who lives alone. At the same time, for students living in an international student accommodation, trying to connect with flatmates from diverse cultures is essential and challenging. This project explores growing herbs can foster a more sustainable and socially connected community. The final design is a modular self-sustaining herb pot, encouraging students to reduce waste and strengthen the bonds through growing, maintaining, and sharing herbs. ",
-    images: [
-      
-      "https://www.yujingshistudio.com/plant_KITCHEN.png",
-      "https://www.yujingshistudio.com/plant_model2.png",
-      "https://www.yujingshistudio.com/plant_model1.png",
-      "https://www.yujingshistudio.com/plant_KITCHEN.png"
-      
-      ],
+    description: "A Modular Herb Pot Reducing Waste and Encouraging Community Sharing.",
+    thumbnail: "https://media.yujingshistudio.com/plant_stick.mp4",
+    video: "https://media.yujingshistudio.com/plant_stick.mp4",
   },
-  "2": {
-    title: "Co-designed Furniture with Stockwell Community",
-    description: "Commissioned by Stockwell Trust, this project designs furniture for Stockwell's new art centre through a series of co-design workshops with local residents. A drying and displaying shelf is made to empower the creatives of different abilities. Responding to both physical and emotional needs, this shelf allows every artwork to be seen in its necessary drying process, making every printing and painting session a temporary exhibition. ",
-    images: [
-      "https://www.yujingshistudio.com/stockwell_workshop.jpg",
-      "https://www.yujingshistudio.com/stockwell_model.jpg",
-      "https://www.yujingshistudio.com/stockwell_render.png",
-      "https://www.yujingshistudio.com/stockwell_detail.jpg",
-      "https://www.yujingshistudio.com/stockwell_play.jpg"
-      ],
+  {
+    id: 2,
+    title: "Co-design with Stockwell Community",
+    description: "Co-designed Furniture with Stockwell Community.",
+    thumbnail: "https://media.yujingshistudio.com/stockwell_render2.jpg",
   },
-  "3": {
+  {
+    id: 3,
     title: "Orbital Time",
-    description:
-      "A visual exploration of geometric forms and patterns, investigating the relationship between structure and randomness. This project examines how repetition and variation can create compelling visual rhythms, drawing inspiration from both natural and man-made patterns. The work challenges conventional perceptions of space and form through abstract compositions.",
-    images: [
-      "https://www.yujingshistudio.com/time_box.mp4",
-      "https://www.yujingshistudio.com/time_detail.JPG",
-      "https://www.yujingshistudio.com/time_model.png",
-      "https://www.yujingshistudio.com/time_rotate.mp4",
-      
-      
-    ],
+    description: "A timer that empowers users to redefine time in their own way.",
+    thumbnail: "https://media.yujingshistudio.com/time_rotate.mp4",
   },
-};
+  // {
+  //   id: 4,
+  //   title: "A Traveller's Living-room",
+  //   description: "Exploring the boundary between home and public space",
+  //   thumbnail: "https://images.unsplash.com/photo-1560461396-ec0ef7bb29dd?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtaW5pbWFsJTIwcHJvZHVjdCUyMGRlc2lnbnxlbnwxfHx8fDE3NzM0ODQxMDh8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
+  // },
+  // {
+  //   id: 5,
+  //   title: "Creative Space",
+  //   description: "Workspace environment design",
+  //   thumbnail: "https://images.unsplash.com/photo-1519217651866-847339e674d4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjcmVhdGl2ZSUyMHdvcmtzcGFjZXxlbnwxfHx8fDE3NzM0MTAwMjJ8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
+  // },
+  // {
+  //   id: 6,
+  //   title: "Art Installation",
+  //   description: "Contemporary spatial art",
+  //   thumbnail: "https://images.unsplash.com/photo-1723242017405-5018aa65ddad?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjb250ZW1wb3JhcnklMjBhcnQlMjBpbnN0YWxsYXRpb258ZW58MXx8fHwxNzczMzkyMjgyfDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
+  // },
+];
 
-export function ProjectDetail() {
-  const { id } = useParams<{ id: string }>();
+export function Home() {
   const navigate = useNavigate();
-  const [showBack, setShowBack] = useState(false);
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-  const [headerVisible, setHeaderVisible] = useState(true);
-  const [lastScrollY, setLastScrollY] = useState(0);
+  const introRef = useRef<HTMLDivElement>(null);
+  const projectsRef = useRef<HTMLDivElement>(null);
+  const contactRef = useRef<HTMLDivElement>(null);
+  const rightColumnRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
+  const [showCursor, setShowCursor] = useState(false);
+  const [showScrollCursor, setShowScrollCursor] = useState(false);
 
-  const handleNavigation = (section?: string) => {
-    if (section) {
-      navigate(`/?section=${section}`);
-    } else {
-      navigate("/");
-    }
+  const scrollToTop = () => {
+    rightColumnRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // 监听鼠标移动，显示back文字
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      setMousePosition({ x: e.clientX, y: e.clientY });
-      // 检查鼠标是否在左边1/5的区域
-      const windowWidth = window.innerWidth;
-      setShowBack(e.clientX < windowWidth / 5);
-    };
+  const scrollToProjects = () => {
+    projectsRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
-  }, []);
+  const scrollToContact = () => {
+    contactRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
-  // 监听滚动，控制header显示/隐藏
-  useEffect(() => {
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY;
+  const handleMouseMove = (e: React.MouseEvent) => {
+    setCursorPosition({ x: e.clientX, y: e.clientY });
+  };
 
-      setLastScrollY((prevScrollY) => {
-        if (currentScrollY > prevScrollY && currentScrollY > 50) {
-          // 向下滚动且超过50px，隐藏header
-          setHeaderVisible(false);
-        } else if (currentScrollY < prevScrollY) {
-          // 向上滚动，显示header
-          setHeaderVisible(true);
-        }
+  const handleMouseEnter = () => {
+    setShowCursor(true);
+  };
 
-        return currentScrollY;
-      });
-    };
+  const handleMouseLeave = () => {
+    setShowCursor(false);
+  };
 
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  const handleRightColumnMouseMove = (e: React.MouseEvent) => {
+    setCursorPosition({ x: e.clientX, y: e.clientY });
+  };
 
-  // 滚动到当前项目
-  useEffect(() => {
-    if (id) {
-      setTimeout(() => {
-        const element = document.querySelector(`[data-project-id=\"${id}\"]`);
-        if (element) {
-          element.scrollIntoView({ behavior: "smooth" });
-        }
-      }, 100);
-    }
-  }, [id]);
+  const handleRightColumnMouseEnter = () => {
+    setShowScrollCursor(true);
+  };
 
-  // 获取所有项目数组
-  const allProjects = Object.entries(projectsData).map(([id, project]) => ({
-    id,
-    ...project,
-  }));
+  const handleRightColumnMouseLeave = () => {
+    setShowScrollCursor(false);
+  };
+
+  const handleVideoMouseEnter = () => {
+    videoRef.current?.play();
+  };
+
+  const handleVideoMouseLeave = () => {
+    videoRef.current?.pause();
+  };
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white overflow-hidden">
       <Header
-        onHomeClick={() => handleNavigation()}
-        onProjectsClick={() => handleNavigation("projects")}
-        onContactClick={() => handleNavigation("contact")}
-        isVisible={headerVisible}
+        onHomeClick={scrollToTop}
+        onProjectsClick={scrollToProjects}
+        onContactClick={scrollToContact}
       />
 
-      {/* 返回文字 */}
-      {showBack && (
+      {/* Custom Cursor for project images - Hidden on mobile */}
+      {showCursor && (
         <div
-          className="fixed z-50 cursor-pointer text-white text-xl"
+          className="fixed pointer-events-none z-50 text-white text-xl tracking-wider hidden lg:block"
           style={{
-            left: `${mousePosition.x}px`,
-            top: `${mousePosition.y}px`,
-            transform: "translate(-50%, -50%)",
+            left: `${cursorPosition.x}px`,
+            top: `${cursorPosition.y}px`,
+            transform: 'translate(-50%, -50%)',
           }}
-          onClick={() => handleNavigation("projects")}
         >
-          back
+          enter
         </div>
       )}
 
-      <div className="pt-14 px-3">
-        {/* 渲染所有项目 */}
-        {allProjects.map((project, projectIndex) => (
-          <div 
-            key={project.id} 
-            data-project-id={project.id}
-            className={projectIndex > 0 ? "mt-24" : ""}
-          >
-            {/* Title and Description - Full Width */}
-            <div className="mb-6">
-              <h1 className="tracking-tight mb-6 font-bold text-[clamp(2.5rem,6vw,4.5rem)]">
-                {project.title}
-              </h1>
-              <p className="text-xl leading-relaxed">{project.description}</p>
-            </div>
+      {/* Scroll Cursor for right column - Hidden on mobile */}
+      {showScrollCursor && !showCursor && (
+        <div
+          className="fixed pointer-events-none z-50 text-gray-400 text-xl tracking-wider hidden lg:block"
+          style={{
+            left: `${cursorPosition.x}px`,
+            top: `${cursorPosition.y}px`,
+            transform: 'translate(-50%, -50%)',
+          }}
+        >
+          scroll
+        </div>
+      )}
 
-            {/* Images - Two columns */}
-            <div className="flex flex-col lg:flex-row gap-3">
-              {/* Left Column - First two images */}
-              <div className="w-full lg:w-1/2 space-y-6">
-                {project.images.slice(0, 2).map((image, index) => (
-                  <div key={index}>
-                    {image.endsWith('.mp4') ? (
+      {/* Main Layout - Single column on mobile, Two Columns on desktop */}
+      <div className="flex flex-col lg:flex-row h-screen">
+        {/* Left Column - Fixed on desktop, scrollable on mobile */}
+        <div className="w-full lg:w-1/2 flex items-start px-3 pt-20 lg:pt-20 lg:fixed lg:h-screen">
+          <h1 className="font-bold leading-none tracking-tight text-[clamp(2.5rem,10vw,12.5rem)]">
+            Hi, I'm<br />Yujing Shi,
+          </h1>
+        </div>
+
+        {/* Right Column - Scrollable */}
+        <div
+          ref={rightColumnRef}
+          className="w-full lg:w-1/2 lg:ml-[50%] overflow-y-auto"
+          style={{ scrollBehavior: "smooth" }}
+          onMouseMove={handleRightColumnMouseMove}
+          onMouseEnter={handleRightColumnMouseEnter}
+          onMouseLeave={handleRightColumnMouseLeave}
+        >
+          {/* Intro Section */}
+          <div ref={introRef} className="min-h-screen flex items-end px-3 pb-8">
+            <p className="text-lg lg:text-2xl leading-relaxed font-light">
+              I'm a product and experience designer exploring embodied and inclusive interaction. 
+              Based in London, working at the intersection 
+              of object-making, computing, and spatial curation.
+              Currently studying Product & Furniture Design at UAL, 
+              with a Creative Computing diploma from CCI.
+            </p>
+          </div>
+
+          {/* Projects Section */}
+          <div ref={projectsRef} data-section="projects" className="min-h-screen py-8 px-3">
+            <h2 className="tracking-tight mb-8 text-[28px] lg:text-[36px] italic font-bold">PROJECTS</h2>
+            <div className="space-y-6">
+              {projects.map((project, index) => (
+                <button
+                  key={project.id}
+                  onClick={() => navigate(`/project/${project.id}`)}
+                  onMouseMove={handleMouseMove}
+                  onMouseEnter={handleMouseEnter}
+                  onMouseLeave={handleMouseLeave}
+                  className="block w-full group lg:cursor-none"
+                >
+                  <div className="aspect-[4/3] overflow-hidden relative">
+                    {project.thumbnail.endsWith('.mp4') ? (
+                      // 视频缩略图
                       <video
-                        src={image}
-                        className="w-full h-auto object-cover"
+                        src={project.thumbnail}
                         loop
                         muted
-                        autoPlay
                         playsInline
+                        onMouseEnter={(e) => e.currentTarget.play()}
+                        onMouseLeave={(e) => e.currentTarget.pause()}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
                     ) : (
+                      // 图片缩略图
                       <img
-                        src={image}
-                        alt={`${project.title} - ${index + 1}`}
-                        className="w-full h-auto object-cover"
+                        src={project.thumbnail}
+                        alt={project.title}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
                     )}
                   </div>
-                ))}
+                  <p className="mt-2 text-sm tracking-wider text-left">
+                    {project.description}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Contact Section */}
+          <div ref={contactRef} data-section="contact" className="min-h-screen py-8 px-3">
+            <div className="flex flex-col lg:flex-row gap-8">
+              {/* Contact Info */}
+              <div className="flex-1">
+                <h2 className="text-[28px] lg:text-[36px] tracking-tight mb-8 font-bold">CONTACT</h2>
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-lg lg:text-xl text-gray-500 mb-2">Instagram</p>
+                    <a
+                      href="https://instagram.com/yujing.context"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-lg lg:text-xl hover:opacity-60 transition-opacity"
+                    >
+                      @yujing.context
+                    </a>
+                  </div>
+                  <div>
+                    <p className="text-lg lg:text-xl text-gray-500 mb-2">Behance</p>
+                    <a
+                      href="https://behance.net/yujingshi6"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-lg lg:text-xl hover:opacity-60 transition-opacity"
+                    >
+                      behance.net/yujingshi6
+                    </a>
+                  </div>
+                  <div>
+                    <p className="text-lg lg:text-xl text-gray-500 mb-2">LinkedIn</p>
+                    <a
+                      href="https://linkedin.com/in/yujingshi6"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-lg lg:text-xl hover:opacity-60 transition-opacity"
+                    >
+                      linkedin.com/in/yujingshi6
+                    </a>
+                  </div>
+                  <div>
+                    <p className="text-lg lg:text-xl text-gray-500 mb-2">Email</p>
+                    <a
+                      href="mailto:shi.yujing@outlook.com"
+                      className="block text-lg lg:text-xl hover:opacity-60 transition-opacity"
+                    >
+                      shi.yujing@outlook.com
+                    </a>
+                  </div>
+                </div>
               </div>
 
-              {/* Right Column - Last images */}
-              <div className="w-full lg:w-1/2 space-y-6 mt-6 lg:mt-0">
-                {project.images.slice(2).map((image, index) => (
-                  <div key={index}>
-                    {image.endsWith('.mp4') ? (
-                      <video
-                        src={image}
-                        className="w-full h-auto object-cover"
-                        loop
-                        muted
-                        autoPlay
-                        playsInline
-                      />
-                    ) : (
-                      <img
-                        src={image}
-                        alt={`${project.title} - ${index + 3}`}
-                        className="w-full h-auto object-cover"
-                      />
-                    )}
-                  </div>
-                ))}
+              {/* Photo */}
+              <div className="flex-1">
+                <div className="aspect-[3/4] overflow-hidden">
+                  <img
+                    src="https://media.yujingshistudio.com/me.jpg"
+                    alt="Yujing Shi"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
               </div>
             </div>
           </div>
-        ))}
+        </div>
       </div>
     </div>
   );
