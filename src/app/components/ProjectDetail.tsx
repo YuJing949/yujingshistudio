@@ -48,7 +48,7 @@ const projectsData: Record<string, Project> = {
   },
 };
 
-export default function ProjectDetail() {
+function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [showBack, setShowBack] = useState(false);
@@ -211,3 +211,6 @@ export default function ProjectDetail() {
     </div>
   );
 }
+
+export default ProjectDetail;
+export { ProjectDetail };
