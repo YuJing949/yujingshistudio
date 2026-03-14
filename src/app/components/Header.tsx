@@ -18,15 +18,21 @@ export function Header({ onHomeClick, onProjectsClick, onContactClick, isVisible
         <button
           onClick={onHomeClick}
           className="tracking-wider hover:opacity-60 transition-opacity text-base lg:text-[20px] font-normal"
-        ><span className=""><span className="">Yujing Shi</span></span></button>
+        >
+          Yujing Shi
+        </button>
         <button
           onClick={onProjectsClick}
           className="tracking-wider hover:opacity-60 transition-opacity text-base lg:text-[20px] font-normal"
-        ><span className="">Projects</span></button>
+        >
+          Projects
+        </button>
         <button
           onClick={onContactClick}
           className="tracking-wider hover:opacity-60 transition-opacity text-base lg:text-[20px] font-normal"
-        ><span className="">Contact</span></button>
+        >
+          Contact
+        </button>
       </nav>
     </header>
   );
