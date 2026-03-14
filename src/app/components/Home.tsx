@@ -9,20 +9,20 @@ const projects = [
     id: 1,
     title: "Grow-Together",
     description: "A Modular Herb Pot Reducing Waste and Encouraging Community Sharing.",
-    thumbnail: "https://www.yujingshistudio.com/plant_stick.mp4",
-    video: "https://www.yujingshistudio.com/plant_stick.mp4",
+    thumbnail: "https://media.yujingshistudio.com/plant_stick.mp4",
+    video: "https://media.yujingshistudio.com/plant_stick.mp4",
   },
   {
     id: 2,
     title: "Co-design with Stockwell Community",
     description: "Co-designed Furniture with Stockwell Community.",
-    thumbnail: "https://www.yujingshistudio.com/stockwell_render2.jpg",
+    thumbnail: "https://media.yujingshistudio.com/stockwell_render2.jpg",
   },
   {
     id: 3,
     title: "Orbital Time",
     description: "A timer that empowers users to redefine time in their own way.",
-    thumbnail: "https://www.yujingshistudio.com/time_rotate.mp4",
+    thumbnail: "https://media.yujingshistudio.com/time_rotate.mp4",
   },
   // {
   //   id: 4,
@@ -262,7 +262,7 @@ export function Home() {
               <div className="flex-1">
                 <div className="aspect-[3/4] overflow-hidden">
                   <img
-                    src="https://www.yujingshistudio.com/me.jpg"
+                    src="https://media.yujingshistudio.com/me.jpg"
                     alt="Yujing Shi"
                     className="w-full h-full object-cover"
                   />
