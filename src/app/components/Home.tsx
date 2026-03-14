@@ -80,6 +80,9 @@ export function Home() {
 
   const handleRightColumnMouseEnter = () => setShowScrollCursor(true);
   const handleRightColumnMouseLeave = () => setShowScrollCursor(false);
+  const handleRightColumnMouseMove = (e: React.MouseEvent) => {
+    setCursorPosition({ x: e.clientX, y: e.clientY });
+  };
 
   return (
     <div className="min-h-screen bg-white overflow-hidden">
@@ -118,9 +121,9 @@ export function Home() {
       )}
 
       {/* Main Layout - Single column on mobile, Two Columns on desktop */}
-      <div className="flex flex-col lg:flex-row h-screen">
-        {/* Left Column - Fixed on desktop, scrollable on mobile */}
-        <div className="w-full lg:w-1/2 flex items-start px-3 pt-20 lg:pt-20 lg:fixed lg:h-screen">
+      <div className="flex flex-col lg:flex-row lg:h-screen">
+        {/* Left Column - Fixed on desktop, compact on mobile */}
+        <div className="w-full lg:w-1/2 flex items-start px-3 pt-20 pb-8 lg:pb-0 lg:fixed lg:h-screen">
           <h1 className="font-bold leading-none tracking-tight text-[clamp(2.5rem,10vw,12.5rem)]">
             Hi, I'm<br />Yujing Shi,
           </h1>
@@ -129,14 +132,14 @@ export function Home() {
         {/* Right Column - Scrollable */}
         <div
           ref={rightColumnRef}
-          className="w-full lg:w-1/2 lg:ml-[50%] overflow-y-auto"
+          className="w-full lg:w-1/2 lg:ml-[50%] lg:overflow-y-auto"
           style={{ scrollBehavior: "smooth" }}
-          onMouseMove={handleMouseMove}
+          onMouseMove={handleRightColumnMouseMove}
           onMouseEnter={handleRightColumnMouseEnter}
           onMouseLeave={handleRightColumnMouseLeave}
         >
           {/* Intro Section */}
-          <div ref={introRef} className="min-h-screen flex items-end px-3 pb-8">
+          <div ref={introRef} className="lg:min-h-screen flex items-start lg:items-end px-3 pb-8">
             <p className="text-lg lg:text-2xl leading-relaxed font-light">
               I'm a product and experience designer exploring embodied and inclusive interaction. 
               Based in London, working at the intersection 
