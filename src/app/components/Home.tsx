@@ -1,8 +1,8 @@
 import React from "react";
-
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { Header } from "./Header";
+import { ImageWithLoading, VideoWithLoading } from "./MediaWithLoading";
 
 const projects = [
   {
@@ -164,8 +164,7 @@ export function Home() {
                 >
                   <div className="aspect-[4/3] overflow-hidden relative">
                     {project.thumbnail.endsWith('.mp4') ? (
-                      // 视频缩略图
-                      <video
+                      <VideoWithLoading
                         src={project.thumbnail}
                         loop
                         muted
@@ -175,8 +174,7 @@ export function Home() {
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
                     ) : (
-                      // 图片缩略图
-                      <img
+                      <ImageWithLoading
                         src={project.thumbnail}
                         alt={project.title}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
@@ -245,8 +243,8 @@ export function Home() {
 
               {/* Photo */}
               <div className="flex-1">
-                <div className="aspect-[3/4] overflow-hidden">
-                  <img
+                <div className="aspect-[3/4] overflow-hidden relative">
+                  <ImageWithLoading
                     src="https://media.yujingshistudio.com/me.jpg"
                     alt="Yujing Shi"
                     className="w-full h-full object-cover"

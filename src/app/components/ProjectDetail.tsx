@@ -2,6 +2,7 @@ import React from "react";
 import { useParams, useNavigate } from "react-router";
 import { useState, useEffect } from "react";
 import { Header } from "./Header";
+import { ImageWithLoading, VideoWithLoading } from "./MediaWithLoading";
 
 interface Project {
   title: string;
@@ -160,10 +161,11 @@ function ProjectDetail() {
               {/* Left Column - First two images */}
               <div className="w-full lg:w-1/2 space-y-3 lg:space-y-6">
                 {project.images.slice(0, 2).map((image, index) => (
-                  <div key={index}>
+                  <div key={index} className="relative">
                     {image.endsWith('.mp4') ? (
-                      <video
+                      <VideoWithLoading
                         src={image}
+                        fillHeight={false}
                         className="w-full h-auto object-cover"
                         loop
                         muted
@@ -171,9 +173,10 @@ function ProjectDetail() {
                         playsInline
                       />
                     ) : (
-                      <img
+                      <ImageWithLoading
                         src={image}
                         alt={`${project.title} - ${index + 1}`}
+                        fillHeight={false}
                         className="w-full h-auto object-cover"
                       />
                     )}
@@ -184,10 +187,11 @@ function ProjectDetail() {
               {/* Right Column - Last images */}
               <div className="w-full lg:w-1/2 space-y-3 lg:space-y-6">
                 {project.images.slice(2).map((image, index) => (
-                  <div key={index}>
+                  <div key={index} className="relative">
                     {image.endsWith('.mp4') ? (
-                      <video
+                      <VideoWithLoading
                         src={image}
+                        fillHeight={false}
                         className="w-full h-auto object-cover"
                         loop
                         muted
@@ -195,9 +199,10 @@ function ProjectDetail() {
                         playsInline
                       />
                     ) : (
-                      <img
+                      <ImageWithLoading
                         src={image}
                         alt={`${project.title} - ${index + 3}`}
+                        fillHeight={false}
                         className="w-full h-auto object-cover"
                       />
                     )}
