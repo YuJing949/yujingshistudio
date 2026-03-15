@@ -16,6 +16,7 @@
     body { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; }
     .page { display: none; flex-direction: column; align-items: center; justify-content: center; width: 100%; max-width: 420px; text-align: center; }
     .page.active { display: flex; }
+    #page-player.page.active { flex-direction: column; min-height: 70vh; }
     h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
     .sub { font-size: 0.9rem; color: #666; margin-bottom: 1.5rem; }
     .btn {
@@ -27,7 +28,11 @@
     .btn-secondary { margin-top: 1rem; background: #333; font-size: 1rem; }
     .heading-display { font-size: 2.5rem; font-weight: 700; margin: 1rem 0; }
     .status { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
-    .btn-row { margin-top: 1rem; display: flex; gap: 10px; }
+    .btn-row { margin-top: auto; padding-top: 1.5rem; display: flex; gap: 10px; }
+    .page-player-top { margin-bottom: 0.5rem; }
+    .page-player-center { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+    .long-press-hint { font-size: 1.15rem; color: #111; margin-top: 1rem; }
+    .player-diff-only { font-size: 2rem; font-weight: 700; margin: 0; color: #111; }
   </style>
 </head>
 <body>
@@ -48,21 +53,22 @@
   </section>
 
   <section id="page-player" class="page">
-    <h1 id="player-title">Find the Direction</h1>
-    <p id="player-sub" class="sub">Volume = proximity. Wind &lt; 30°, Birds &lt; 5°.</p>
-    <div id="player-ui">
-        <p id="player-heading" class="heading-display">— °</p>
-        <p id="player-diff" class="status">— ° off</p>
+    <div class="page-player-top">
+      <h1 id="player-title">Find the Direction</h1>
+      <p id="player-sub" class="sub">Volume = proximity. Wind &lt; 30°, Birds &lt; 5°.</p>
     </div>
-    <button id="btn-start" class="btn">Start Game</button>
+    <div class="page-player-center">
+      <p id="player-diff" class="player-diff-only" style="display:none;">— ° off</p>
+      <p class="long-press-hint">Long Press Anywhere for 2secs to Start or End.</p>
+    </div>
     <div id="test-player" style="display:none; margin-top:1rem; padding:0.75rem; background:#f0f0f0; border-radius:8px; font-size:0.85rem; width:100%; max-width:280px;">
       <strong>Test mode</strong> — drag to simulate heading (0° off = loud, 180° off = silent):
       <input type="range" id="slider-player" min="0" max="360" value="0" style="display:block; width:100%; margin:0.25rem 0;">
       <span id="value-player">0</span>°
     </div>
     <div class="btn-row">
-        <button id="btn-hide" class="btn btn-secondary">Hide UI</button>
-        <button id="btn-restart" class="btn btn-secondary">Restart</button>
+      <button id="btn-show-direction" class="btn btn-secondary">Show Direction</button>
+      <button id="btn-restart" class="btn btn-secondary">Restart</button>
     </div>
   </section>
 
@@ -80,8 +86,11 @@
   var filteredHeading = null;
   var EMA_ALPHA = 0.15;
   var gameStarted = false;
-  var uiVisible = true;
+  var directionVisible = false;  // default: do not show "X° off"; click Show Direction to reveal
   var testMode = /[?&]test=1/.test(location.search);
+  var longPressTimer = null;
+  var LONG_PRESS_MS = 2000;  // 2 seconds for both touch and mouse
+  var VIBRATE_MS = 1000;
 
   // Web Audio 变量
   var audioCtx = null;
@@ -130,9 +139,10 @@
     var vBirds = diff <= 5 ? (1 - diff / 5) : 0;
     setGain(tracks.birds.gain, vBirds);
 
-    // 更新 UI
-    document.getElementById('player-heading').textContent = Math.round(filteredHeading) + '°';
-    document.getElementById('player-diff').textContent = Math.round(diff) + '° off';
+    // 更新 UI（仅 ° off，默认不展示由 Show Direction 控制）
+    var diffEl = document.getElementById('player-diff');
+    diffEl.textContent = Math.round(diff) + '° off';
+    if (directionVisible) diffEl.style.display = '';
   }
 
   function setGain(gainNode, value) {
@@ -221,7 +231,7 @@
     document.getElementById('page-player').classList.add('active');
   });
 
-  document.getElementById('btn-start').addEventListener('click', function() {
+  function doStartGame() {
     if (!audioCtx || targetHeading == null) return;
     gameStarted = true;
     if (testMode) {
@@ -230,18 +240,49 @@
       document.getElementById('value-player').textContent = filteredHeading;
     }
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    
-    // 同时启动所有音轨
     for (var key in tracks) { tracks[key].el.play(); }
-    
-    this.style.display = 'none';
     updateVolumes();
-  });
+  }
 
-  document.getElementById('btn-hide').addEventListener('click', function() {
-    uiVisible = !uiVisible;
-    document.getElementById('player-ui').style.opacity = uiVisible ? '1' : '0';
-    this.textContent = uiVisible ? 'Hide UI' : 'Show UI';
+  function doEndGame() {
+    gameStarted = false;
+    for (var key in tracks) {
+      tracks[key].el.pause();
+      tracks[key].el.currentTime = 0;
+      setGain(tracks[key].gain, 0);
+    }
+  }
+
+  function onLongPress() {
+    longPressTimer = null;
+    if (navigator.vibrate) navigator.vibrate(VIBRATE_MS);
+    if (gameStarted) doEndGame(); else doStartGame();
+  }
+
+  function clearLongPressTimer() {
+    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  }
+
+  var playerEl = document.getElementById('page-player');
+  function startLongPressTimer(ev) {
+    if (!playerEl.classList.contains('active')) return;
+    if (ev.target.closest('button') || ev.target.closest('input')) return;
+    ev.preventDefault();
+    clearLongPressTimer();
+    longPressTimer = setTimeout(onLongPress, LONG_PRESS_MS);
+  }
+  playerEl.addEventListener('touchstart', startLongPressTimer, { passive: false });
+  playerEl.addEventListener('mousedown', startLongPressTimer);
+  playerEl.addEventListener('touchend', clearLongPressTimer);
+  playerEl.addEventListener('mouseup', clearLongPressTimer);
+  playerEl.addEventListener('mouseleave', clearLongPressTimer);
+  playerEl.addEventListener('touchcancel', clearLongPressTimer);
+  playerEl.addEventListener('contextmenu', function(ev) { ev.preventDefault(); });
+
+  document.getElementById('btn-show-direction').addEventListener('click', function() {
+    directionVisible = !directionVisible;
+    document.getElementById('player-diff').style.display = directionVisible ? '' : 'none';
+    this.textContent = directionVisible ? 'Hide Direction' : 'Show Direction';
   });
 
   document.getElementById('btn-restart').addEventListener('click', function() {
