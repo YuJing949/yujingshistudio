@@ -1,0 +1,3 @@
+# Serve compass game (static HTML) at /compass and /compass/ so they don't fall through to SPA
+/compass    /compass/index.html   200
+/compass/   /compass/index.html   200
