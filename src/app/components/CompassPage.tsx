@@ -1,14 +1,13 @@
 import React from "react";
 
 /**
- * Wraps the static compass game (public/compass/index.html) in a full-screen iframe.
- * Same pattern as find-me: the static HTML is served at /compass/index.html;
- * this route ensures /compass and /compass/ show it without relying on _redirects.
+ * Wraps the static compass game in a full-screen iframe.
+ * Uses /compass.html (root-level static file) so Cloudflare serves it without SPA fallback.
  */
 export function CompassPage() {
   return (
     <iframe
-      src="/compass/index.html"
+      src="/compass.html"
       title="Compass — Find the direction"
       style={{
         position: "fixed",

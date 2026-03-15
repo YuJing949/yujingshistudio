@@ -20,4 +20,8 @@ export const router = createBrowserRouter([
     path: "/compass/",
     Component: CompassPage,
   },
+  {
+    path: "/compass/index.html",
+    Component: CompassPage,
+  },
 ]);
