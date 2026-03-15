@@ -1,5 +1,4 @@
-import React from "react";
-import { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { Header } from "./Header";
 import { ImageWithLoading, VideoWithLoading } from "./MediaWithLoading";
@@ -50,9 +49,11 @@ export function Home() {
   const projectsRef = useRef<HTMLDivElement>(null);
   const contactRef = useRef<HTMLDivElement>(null);
   const rightColumnRef = useRef<HTMLDivElement>(null);
+  const leftColumnRef = useRef<HTMLDivElement>(null);
   const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
   const [showCursor, setShowCursor] = useState(false);
-  const [showScrollCursor, setShowScrollCursor] = useState(false);
+  const [isLeftColumnHovered, setIsLeftColumnHovered] = useState(false);
+  const [isRightColumnHovered, setIsRightColumnHovered] = useState(false);
 
   const scrollToTop = () => {
     rightColumnRef.current?.scrollTo({ top: 0, behavior: "smooth" });
@@ -78,11 +79,27 @@ export function Home() {
     setShowCursor(false);
   };
 
-  const handleRightColumnMouseEnter = () => setShowScrollCursor(true);
-  const handleRightColumnMouseLeave = () => setShowScrollCursor(false);
+  const handleRightColumnMouseEnter = () => setIsRightColumnHovered(true);
+  const handleRightColumnMouseLeave = () => setIsRightColumnHovered(false);
+  const handleLeftColumnMouseEnter = () => setIsLeftColumnHovered(true);
+  const handleLeftColumnMouseLeave = () => setIsLeftColumnHovered(false);
   const handleRightColumnMouseMove = (e: React.MouseEvent) => {
     setCursorPosition({ x: e.clientX, y: e.clientY });
   };
+
+  // 左栏滚轮时滚动右栏（仅桌面端）
+  useEffect(() => {
+    const el = leftColumnRef.current;
+    if (!el) return;
+    const handleWheel = (e: WheelEvent) => {
+      if (window.innerWidth >= 1024 && rightColumnRef.current) {
+        e.preventDefault();
+        rightColumnRef.current.scrollTop += e.deltaY;
+      }
+    };
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, []);
 
   return (
     <div className="min-h-screen bg-white overflow-hidden">
@@ -106,8 +123,8 @@ export function Home() {
         </div>
       )}
 
-      {/* Scroll Cursor for right column - Hidden on mobile */}
-      {showScrollCursor && !showCursor && (
+      {/* Scroll Cursor when over left or right column - Hidden on mobile */}
+      {(isLeftColumnHovered || isRightColumnHovered) && !showCursor && (
         <div
           className="fixed pointer-events-none z-50 text-gray-400 text-xl tracking-wider hidden lg:block"
           style={{
@@ -123,7 +140,13 @@ export function Home() {
       {/* Main Layout - Single column on mobile, Two Columns on desktop */}
       <div className="flex flex-col lg:flex-row lg:h-screen">
         {/* Left Column - Fixed on desktop, compact on mobile */}
-        <div className="w-full lg:w-1/2 flex items-start px-3 pt-20 pb-8 lg:pb-0 lg:fixed lg:h-screen">
+        <div
+          ref={leftColumnRef}
+          className="w-full lg:w-1/2 flex items-start px-3 pt-20 pb-8 lg:pb-0 lg:fixed lg:h-screen"
+          onMouseMove={handleRightColumnMouseMove}
+          onMouseEnter={handleLeftColumnMouseEnter}
+          onMouseLeave={handleLeftColumnMouseLeave}
+        >
           <h1 className="font-bold leading-none tracking-tight text-[clamp(2.5rem,10vw,12.5rem)]">
             Hi, I'm<br />Yujing Shi,
           </h1>
