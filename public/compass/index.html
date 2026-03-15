@@ -254,7 +254,14 @@
     var diff = Math.abs(shortestAngleDiff(filteredHeading, targetHeading));
     playerHeading.textContent = Math.round(filteredHeading) + '°';
     playerDiff.textContent = Math.round(diff) + '° off';
-    var vol = 1 - (diff / 180);
+    // 0° = vol 1.0 (max), 180° = vol 0 (silent). Steep curve so turning changes volume clearly.
+    var vol;
+    if (diff >= 180) {
+      vol = 0;
+    } else {
+      var linear = 1 - diff / 180;
+      vol = Math.pow(linear, 1.5);
+    }
     vol = Math.max(0, Math.min(1, vol));
     if (audioRiver) audioRiver.volume = vol;
     compassNeedle.style.transform = 'rotate(' + filteredHeading + 'deg)';
