@@ -111,9 +111,8 @@
   <section id="page-setup" class="page active">
     <h1>Find Me</h1>
     <p class="sub">Set your target location, then walk to find it.</p>
-    <button id="btn-allow-location" class="btn" type="button">Allow location</button>
-    <button id="btn-set-target" class="btn" type="button" style="display:none;">Set Target</button>
-    <p id="setup-status" class="status">Tap "Allow location" to enable GPS for this game.</p>
+    <button id="btn-set-target" class="btn" type="button">Set Target</button>
+    <p id="setup-status" class="status"></p>
   </section>
 
   <!-- Page 2: Game -->
@@ -155,7 +154,6 @@
   // ——— DOM ———
   var pageSetup = document.getElementById('page-setup');
   var pageGame = document.getElementById('page-game');
-  var btnAllowLocation = document.getElementById('btn-allow-location');
   var btnSetTarget = document.getElementById('btn-set-target');
   var btnStart = document.getElementById('btn-start');
   var btnEnd = document.getElementById('btn-end');
@@ -298,22 +296,11 @@
       }
     } else {
       setSetupStatus('Ready. Tap "Set Target" to save this spot.');
-      btnAllowLocation.style.display = 'none';
-      btnSetTarget.style.display = 'inline-flex';
     }
   }
 
   function onError(err) {
     var msg = 'Location error: ' + (err.message || 'unknown');
-    if (err.code === 1) {
-      msg = 'Location denied. Tap "Allow location" to try again, or allow in browser settings.';
-      if (watchId != null) {
-        navigator.geolocation.clearWatch(watchId);
-        watchId = null;
-      }
-      btnAllowLocation.style.display = 'inline-flex';
-      btnSetTarget.style.display = 'none';
-    }
     if (target) setGameStatus(msg); else setSetupStatus(msg, true);
   }
 
@@ -389,22 +376,11 @@
     gameFound.style.display = 'none';
     setGameStatus('Tap Start to begin');
     showPage(pageSetup);
-    setSetupStatus('Tap "Allow location" to enable GPS for this game.');
-    btnAllowLocation.style.display = 'inline-flex';
-    btnSetTarget.style.display = 'none';
-  }
-
-  function onAllowLocation() {
-    btnAllowLocation.style.display = 'none';
-    setSetupStatus('Getting position…');
+    setSetupStatus('');
     startWatching();
   }
 
   // ——— Init ———
-  btnAllowLocation.addEventListener('click', function () {
-    onAllowLocation();
-  }, { passive: true });
-
   btnSetTarget.addEventListener('click', function () {
     onSetTarget();
   }, { passive: true });
@@ -418,6 +394,8 @@
   }, { passive: true });
 
   ensureAudio();
+  startWatching();
+  setSetupStatus('Getting position…');
 })();
   </script>
 </body>

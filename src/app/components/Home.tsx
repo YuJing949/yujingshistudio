@@ -87,15 +87,24 @@ export function Home() {
     setCursorPosition({ x: e.clientX, y: e.clientY });
   };
 
-  // 左栏滚轮时滚动右栏（仅桌面端）
+  // 左栏滚轮时滚动右栏（仅桌面端），与右栏原生滚动手感一致
   useEffect(() => {
     const el = leftColumnRef.current;
     if (!el) return;
     const handleWheel = (e: WheelEvent) => {
-      if (window.innerWidth >= 1024 && rightColumnRef.current) {
-        e.preventDefault();
-        rightColumnRef.current.scrollTop += e.deltaY;
+      if (window.innerWidth < 1024 || !rightColumnRef.current) return;
+      e.preventDefault();
+      const container = rightColumnRef.current;
+      // 按 deltaMode 转成像素，与浏览器原生滚动一致
+      let delta = 0;
+      if (e.deltaMode === 0) {
+        delta = e.deltaY; // 已是像素
+      } else if (e.deltaMode === 1) {
+        delta = e.deltaY * 40; // 行 → 约 40px/行
+      } else {
+        delta = e.deltaY * container.clientHeight; // 页
       }
+      container.scrollTop += delta;
     };
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
