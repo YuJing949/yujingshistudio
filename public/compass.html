@@ -4,36 +4,65 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Compass — Find the direction</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@300;400;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     html, body {
       margin: 0; padding: 0; min-height: 100vh;
       background: #fff; color: #111;
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: 'Noto Sans', sans-serif; font-weight: 400;
       -webkit-font-smoothing: antialiased;
       touch-action: manipulation; overflow-x: hidden;
     }
     body { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; }
     .page { display: none; flex-direction: column; align-items: center; justify-content: center; width: 100%; max-width: 420px; text-align: center; }
     .page.active { display: flex; }
-    #page-player.page.active { flex-direction: column; min-height: 100vh; padding-bottom: 40px; }
-    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-    .sub { font-size: 0.9rem; color: #666; margin-bottom: 1.5rem; }
+    h1 { font-family: 'Noto Sans', sans-serif; font-weight: 700; font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .sub { font-family: 'Noto Sans', sans-serif; font-weight: 300; font-size: 0.9rem; color: #666; margin-bottom: 1.5rem; }
     .btn {
+      font-family: 'Noto Sans', sans-serif; font-weight: 700;
       display: inline-flex; align-items: center; justify-content: center;
       min-height: 56px; min-width: 200px; padding: 1rem 2rem;
-      font-size: 1.25rem; font-weight: 600; color: #fff;
+      font-size: 1.25rem; color: #fff;
       background: #111; border: none; border-radius: 12px; cursor: pointer;
     }
     .btn-secondary { margin-top: 1rem; background: #333; font-size: 1rem; }
-    .heading-display { font-size: 2.5rem; font-weight: 700; margin: 1rem 0; }
-    .status { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
-    #page-player .btn-row { margin-top: auto; padding-top: 1.5rem; padding-bottom: 0; display: flex; gap: 10px; }
-    .page-player-top { margin-bottom: 0.5rem; }
-    .page-player-center { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
-    .long-press-hint { font-size: 1.15rem; color: #111; margin-top: 1rem; }
-    .player-diff-only { font-size: 2rem; font-weight: 700; margin: 0; color: #111; }
-  </style>
+    .heading-display { font-family: 'Noto Sans', sans-serif; font-weight: 700; font-size: 2.5rem; margin: 1rem 0; }
+    .status { font-family: 'Noto Sans', sans-serif; font-weight: 300; font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
+    /* Player page: left-aligned layout */
+    #page-player.page.active { flex-direction: column; align-items: stretch; text-align: left; min-height: 100vh; padding-bottom: 30px; padding-left: 0; }
+    #page-player .page-player-top { width: 100%; text-align: left; margin-bottom: 0.5rem; padding-left: 0; }
+    #page-player .page-player-top h1 { margin-left: 0; padding-left: 0; }
+    #page-player .page-player-center { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; text-align: left; width: 100%; }
+    #page-player .long-press-hint { font-family: 'Noto Sans', sans-serif; font-weight: 300; font-size: 1.15rem; color: #111; margin-top: 1rem; }
+    #page-player .player-diff-only { font-family: 'Noto Sans', sans-serif; font-weight: 700; font-size: 2rem; margin: 0; color: #111; }
+      /* 1. 确保按钮容器完全靠左，没有内边距干扰 */
+  #page-player .btn-row {
+    margin-top: auto;
+    padding-top: 1.5rem;
+    padding-bottom: 30px; /* 留出安全区域 */
+    padding-left: 0;      /* 确保容器本身不缩进 */
+    display: flex;
+    flex-direction: column;
+    gap: 15px;            /* 按钮之间的间距 */
+    align-items: flex-start;
+  }
+
+  /* 2. 移除按钮左侧的 padding，使文字对齐边界 */
+  #page-player .btn-row .btn {
+    color: #111;
+    background: transparent;
+    font-size: 1.15rem;
+    min-width: auto;
+    min-height: auto;     /* 移除最小高度限制，让它更像纯文字链接 */
+    padding: 5px 0 5px 0; /* 上下留 5px，左右 0 使字形左边界与标题对齐 */
+    text-align: left;
+    border-radius: 0;     /* 纯文字模式不需要圆角 */
+    justify-content: flex-start; /* 内部内容左对齐 */
+  }
+</style>
 </head>
 <body>
 
