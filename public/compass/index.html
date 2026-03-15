@@ -182,7 +182,9 @@
   var filteredHeading = null;     // EMA-smoothed current heading
   var orientationListener = null;
   var sensorsEnabled = false;
-  var audioRiver = null;
+  var audioRiver = null;         // HTML Audio element (for loading/looping)
+  var audioContext = null;       // Web Audio API
+  var gainNode = null;           // gain = volume from angle
   var audioUnlocked = false;
   var gameStarted = false;
   var rafId = null;
@@ -263,7 +265,9 @@
       vol = Math.pow(linear, 1.5);
     }
     vol = Math.max(0, Math.min(1, vol));
-    if (audioRiver) audioRiver.volume = vol;
+    if (gainNode) {
+      gainNode.gain.setTargetAtTime(vol, audioContext.currentTime, 0.04);
+    }
     compassNeedle.style.transform = 'rotate(' + filteredHeading + 'deg)';
     compassTarget.style.transform = 'rotate(' + targetHeading + 'deg)';
   }
@@ -317,8 +321,19 @@
   function startRiver() {
     if (!audioRiver) audioRiver = createAudio(AUDIO_RIVER);
     audioUnlocked = true;
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!audioContext && Ctx) {
+      audioContext = new Ctx();
+      var source = audioContext.createMediaElementSource(audioRiver);
+      gainNode = audioContext.createGain();
+      gainNode.gain.value = 0;
+      source.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+    }
+    if (audioContext && audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
     audioRiver.currentTime = 0;
-    audioRiver.volume = 0;
     audioRiver.play().catch(function () {});
   }
 
@@ -327,6 +342,7 @@
       audioRiver.pause();
       audioRiver.currentTime = 0;
     }
+    if (gainNode) gainNode.gain.setTargetAtTime(0, (audioContext && audioContext.currentTime) || 0, 0.02);
   }
 
   btnEnableSensors.addEventListener('click', function () {
