@@ -165,6 +165,7 @@
   var gameStarted = false;
   var playerUIVisible = true;  // false when Hide clicked
   var rafId = null;
+  var updateIntervalId = null;  // periodic apply for iOS (volume/pause often need repeated apply)
   var testMode = /[?&]test=1/.test(location.search);
 
   var pageSetup = document.getElementById('page-setup');
@@ -266,7 +267,7 @@
     }
     vol = Math.max(0, Math.min(1, vol));
     if (audioRiver) audioRiver.volume = vol;
-    // Birds: only when diff <= 30°; 0° = vol 1, 30° = vol 0; >30° = pause
+    // Birds: only when diff <= 30°; 0° = vol 1, 30° = vol 0; >30° = mute and pause (iOS needs volume=0 too)
     if (audioBirds) {
       if (diff <= BIRDS_ANGLE_MAX) {
         var volBirds = 1 - diff / BIRDS_ANGLE_MAX;
@@ -276,11 +277,12 @@
           audioBirds.play().catch(function () {});
         }
       } else {
+        audioBirds.volume = 0;
         audioBirds.pause();
         audioBirds.currentTime = 0;
       }
     }
-    // Wind: only when diff <= 5°; 0° = vol 1, 5° = vol 0; >5° = pause
+    // Wind: only when diff <= 5°; 0° = vol 1, 5° = vol 0; >5° = mute and pause
     if (audioWind) {
       if (diff <= WIND_ANGLE_MAX) {
         var volWind = 1 - diff / WIND_ANGLE_MAX;
@@ -290,6 +292,7 @@
           audioWind.play().catch(function () {});
         }
       } else {
+        audioWind.volume = 0;
         audioWind.pause();
         audioWind.currentTime = 0;
       }
@@ -361,6 +364,7 @@
       audioBirds.currentTime = 0;
       audioBirds.play().catch(function () {});
     } else {
+      audioBirds.volume = 0;
       audioBirds.pause();
       audioBirds.currentTime = 0;
     }
@@ -369,6 +373,7 @@
       audioWind.currentTime = 0;
       audioWind.play().catch(function () {});
     } else {
+      audioWind.volume = 0;
       audioWind.pause();
       audioWind.currentTime = 0;
     }
@@ -437,10 +442,15 @@
     }
     startRiver();
     updatePlayerUI();
+    if (updateIntervalId) clearInterval(updateIntervalId);
+    updateIntervalId = setInterval(function () {
+      if (gameStarted && filteredHeading != null && targetHeading != null) updatePlayerUI();
+    }, 120);
   });
 
   btnEnd.addEventListener('click', function () {
     gameStarted = false;
+    if (updateIntervalId) { clearInterval(updateIntervalId); updateIntervalId = null; }
     stopRiver();
     playerStatus.textContent = 'Ended. Tap Start again or Restart.';
   });
