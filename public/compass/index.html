@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>Compass — Find the direction</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      background: #fff;
+      color: #111;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      overflow-x: hidden;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .page {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      max-width: 420px;
+      min-height: 60vh;
+      text-align: center;
+    }
+    .page.active { display: flex; }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+      color: #111;
+    }
+    .sub {
+      font-size: 0.9rem;
+      color: #666;
+      margin-bottom: 1.5rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 56px;
+      min-width: 200px;
+      padding: 1rem 2rem;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #fff;
+      background: #111;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      -webkit-appearance: none;
+      appearance: none;
+      touch-action: manipulation;
+      user-select: none;
+      transition: transform 0.1s ease, opacity 0.2s ease;
+    }
+    .btn:active { transform: scale(0.98); opacity: 0.9; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary {
+      margin-top: 1rem;
+      background: #333;
+      font-size: 1rem;
+    }
+    .heading-display {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin: 1rem 0;
+      color: #111;
+      letter-spacing: -0.02em;
+    }
+    .heading-display.waiting {
+      font-size: 1.25rem;
+      font-weight: 500;
+      color: #666;
+    }
+    .compass-ring {
+      width: 220px;
+      height: 220px;
+      margin: 1.5rem auto;
+      position: relative;
+      border: 4px solid #111;
+      border-radius: 50%;
+      background: #fff;
+    }
+    .compass-needle {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 6px;
+      height: 48%;
+      margin-left: -3px;
+      margin-top: -48%;
+      background: #111;
+      border-radius: 3px;
+      transform-origin: 50% 100%;
+      transition: transform 0.08s ease-out;
+    }
+    .compass-target {
+      position: absolute;
+      left: 50%;
+      top: 12%;
+      width: 0;
+      height: 0;
+      margin-left: -8px;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-top: 20px solid #0a0;
+      transform-origin: 50% 100%;
+      transition: transform 0.08s ease-out;
+    }
+    .angle-diff {
+      font-size: 1.1rem;
+      color: #666;
+      margin-top: 0.5rem;
+    }
+    .status {
+      font-size: 0.85rem;
+      color: #666;
+      margin-top: 0.5rem;
+    }
+    .error { color: #c00; }
+    .btn-row { margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <!-- Page 1: Admin Setup -->
+  <section id="page-setup" class="page active">
+    <h1>Compass</h1>
+    <p class="sub">Enable sensors, lock a direction, then hand the phone to the player.</p>
+    <button id="btn-enable-sensors" class="btn" type="button">Enable Sensors</button>
+    <p id="setup-heading" class="heading-display waiting">— °</p>
+    <button id="btn-lock" class="btn btn-secondary" type="button" style="display:none;">Lock Direction</button>
+    <button id="btn-next" class="btn btn-secondary" type="button" style="display:none;">Next</button>
+    <p id="setup-status" class="status">Tap "Enable Sensors" to use the compass.</p>
+  </section>
+
+  <!-- Page 2: Player Game -->
+  <section id="page-player" class="page">
+    <h1>Find the direction</h1>
+    <p class="sub">Point the phone toward the locked direction. Volume = how close you are.</p>
+    <div id="player-display" class="player-display" style="display:none;">
+      <div class="compass-ring">
+        <div id="compass-needle" class="compass-needle"></div>
+        <div id="compass-target" class="compass-target"></div>
+      </div>
+      <p id="player-heading" class="heading-display">— °</p>
+      <p id="player-diff" class="angle-diff">— ° off</p>
+    </div>
+    <p id="player-status" class="status">Tap Start to begin</p>
+    <button id="btn-start" class="btn" type="button">Start</button>
+    <button id="btn-end" class="btn btn-secondary" type="button">End</button>
+    <div class="btn-row">
+      <button id="btn-restart" class="btn btn-secondary" type="button">Restart</button>
+    </div>
+  </section>
+
+  <script>
+(function () {
+  'use strict';
+
+  var AUDIO_RIVER = 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/nature/river.mp3';
+  var EMA_ALPHA = 0.12;  // Low-pass: smaller = smoother (less jitter), more lag
+
+  var targetHeading = null;       // 0–360, locked in setup
+  var filteredHeading = null;     // EMA-smoothed current heading
+  var orientationListener = null;
+  var sensorsEnabled = false;
+  var audioRiver = null;
+  var audioUnlocked = false;
+  var gameStarted = false;
+  var rafId = null;
+
+  var pageSetup = document.getElementById('page-setup');
+  var pagePlayer = document.getElementById('page-player');
+  var btnEnableSensors = document.getElementById('btn-enable-sensors');
+  var btnLock = document.getElementById('btn-lock');
+  var btnNext = document.getElementById('btn-next');
+  var btnStart = document.getElementById('btn-start');
+  var btnEnd = document.getElementById('btn-end');
+  var btnRestart = document.getElementById('btn-restart');
+  var setupHeading = document.getElementById('setup-heading');
+  var setupStatus = document.getElementById('setup-status');
+  var playerDisplay = document.getElementById('player-display');
+  var playerHeading = document.getElementById('player-heading');
+  var playerDiff = document.getElementById('player-diff');
+  var playerStatus = document.getElementById('player-status');
+  var compassNeedle = document.getElementById('compass-needle');
+  var compassTarget = document.getElementById('compass-target');
+
+  // ——— Shortest angle difference (-180..180) ———
+  function shortestAngleDiff(from, to) {
+    var d = (to - from + 360) % 360;
+    return d > 180 ? d - 360 : d;
+  }
+
+  function normalize360(a) {
+    a = a % 360;
+    return a < 0 ? a + 360 : a;
+  }
+
+  // ——— EMA filter for heading (handles wrap) ———
+  function filterHeading(next) {
+    if (next == null || isNaN(next)) return filteredHeading;
+    if (filteredHeading == null) return next;
+    var d = shortestAngleDiff(filteredHeading, next);
+    return normalize360(filteredHeading + EMA_ALPHA * d);
+  }
+
+  // ——— Raw heading from event (0–360) ———
+  function getHeadingFromEvent(ev) {
+    if (typeof ev.webkitCompassHeading === 'number' && !isNaN(ev.webkitCompassHeading))
+      return ev.webkitCompassHeading;
+    if (typeof ev.alpha === 'number' && !isNaN(ev.alpha)) {
+      var a = ev.alpha;
+      if (typeof ev.webkitCompassHeading === 'undefined' && typeof ev.absolute !== 'undefined' && ev.absolute === false)
+        a = 360 - a;
+      return normalize360(a);
+    }
+    return null;
+  }
+
+  function onDeviceOrientation(ev) {
+    var raw = getHeadingFromEvent(ev);
+    if (raw == null) return;
+    filteredHeading = filterHeading(raw);
+    if (pageSetup.classList.contains('active')) {
+      setupHeading.textContent = Math.round(filteredHeading) + '°';
+      setupHeading.classList.remove('waiting');
+    }
+    if (pagePlayer.classList.contains('active') && gameStarted) {
+      updatePlayerUI();
+    }
+  }
+
+  function updatePlayerUI() {
+    if (filteredHeading == null || targetHeading == null) return;
+    var diff = Math.abs(shortestAngleDiff(filteredHeading, targetHeading));
+    playerHeading.textContent = Math.round(filteredHeading) + '°';
+    playerDiff.textContent = Math.round(diff) + '° off';
+    var vol = 1 - (diff / 180);
+    vol = Math.max(0, Math.min(1, vol));
+    if (audioRiver) audioRiver.volume = vol;
+    compassNeedle.style.transform = 'rotate(' + filteredHeading + 'deg)';
+    compassTarget.style.transform = 'rotate(' + targetHeading + 'deg)';
+  }
+
+  function startWatchingOrientation() {
+    if (orientationListener) return;
+    var eventName = typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'
+      ? 'deviceorientation'
+      : (window.DeviceOrientationEvent && 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation');
+    orientationListener = onDeviceOrientation;
+    window.addEventListener(eventName, orientationListener, { passive: true });
+    sensorsEnabled = true;
+    setSetupStatus('Rotate your phone. When ready, tap "Lock Direction".');
+    btnLock.style.display = 'inline-flex';
+    btnNext.style.display = 'inline-flex';
+  }
+
+  function requestPermissionAndStart() {
+    if (typeof DeviceOrientationEvent === 'undefined' || typeof DeviceOrientationEvent.requestPermission !== 'function') {
+      startWatchingOrientation();
+      return;
+    }
+    DeviceOrientationEvent.requestPermission()
+      .then(function (state) {
+        if (state === 'granted') startWatchingOrientation();
+        else setSetupStatus('Permission denied. Enable Motion & Orientation in Settings.', true);
+      })
+      .catch(function (err) {
+        setSetupStatus('Could not request permission: ' + (err && err.message ? err.message : 'unknown'), true);
+      });
+  }
+
+  function setSetupStatus(msg, isError) {
+    setupStatus.textContent = msg || '';
+    setupStatus.className = 'status' + (isError ? ' error' : '');
+  }
+
+  function showPage(pageEl) {
+    pageSetup.classList.remove('active');
+    pagePlayer.classList.remove('active');
+    pageEl.classList.add('active');
+  }
+
+  function createAudio(url) {
+    var a = new Audio(url);
+    a.preload = 'auto';
+    a.loop = true;
+    return a;
+  }
+
+  function startRiver() {
+    if (!audioRiver) audioRiver = createAudio(AUDIO_RIVER);
+    audioUnlocked = true;
+    audioRiver.currentTime = 0;
+    audioRiver.volume = 0;
+    audioRiver.play().catch(function () {});
+  }
+
+  function stopRiver() {
+    if (audioRiver) {
+      audioRiver.pause();
+      audioRiver.currentTime = 0;
+    }
+  }
+
+  btnEnableSensors.addEventListener('click', function () {
+    requestPermissionAndStart();
+  });
+
+  btnLock.addEventListener('click', function () {
+    if (filteredHeading != null) {
+      targetHeading = Math.round(filteredHeading);
+      setSetupStatus('Locked at ' + targetHeading + '°. Tap Next to continue.');
+    }
+  });
+
+  btnNext.addEventListener('click', function () {
+    if (targetHeading == null) {
+      setSetupStatus('Tap "Lock Direction" first.', true);
+      return;
+    }
+    showPage(pagePlayer);
+  });
+
+  btnStart.addEventListener('click', function () {
+    gameStarted = true;
+    playerDisplay.style.display = 'block';
+    playerStatus.textContent = 'Point toward the green marker. Volume = closeness.';
+    startRiver();
+    updatePlayerUI();
+  });
+
+  btnEnd.addEventListener('click', function () {
+    gameStarted = false;
+    stopRiver();
+    playerStatus.textContent = 'Ended. Tap Start again or Restart.';
+  });
+
+  btnRestart.addEventListener('click', function () {
+    window.location.reload();
+  });
+
+})();
+  </script>
+</body>
+</html>
