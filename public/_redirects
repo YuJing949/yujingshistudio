@@ -1,3 +1,5 @@
-# Serve compass game (static HTML) at /compass and /compass/ so they don't fall through to SPA
+# Serve static HTML games at directory paths (same rule for both; 200 = proxy, no redirect loop)
+/find-me    /find-me/index.html   200
+/find-me/   /find-me/index.html   200
 /compass    /compass/index.html   200
 /compass/   /compass/index.html   200
