@@ -49,7 +49,7 @@
 
   <section id="page-player" class="page">
     <h1 id="player-title">Find the Direction</h1>
-    <p id="player-sub" class="sub">Volume = proximity. Birds < 30°, Wind < 5°.</p>
+    <p id="player-sub" class="sub">Volume = proximity. Wind &lt; 30°, Birds &lt; 5°.</p>
     <div id="player-ui">
         <p id="player-heading" class="heading-display">— °</p>
         <p id="player-diff" class="status">— ° off</p>
@@ -122,13 +122,13 @@
     var vRiver = Math.pow(Math.max(0, 1 - diff / 180), 1.5);
     setGain(tracks.river.gain, vRiver);
 
-    // 2. Birds: < 30° 开始出现
-    var vBirds = diff <= 30 ? (1 - diff / 30) : 0;
-    setGain(tracks.birds.gain, vBirds);
-
-    // 3. Wind: < 5° 开始出现 (定位最准时)
-    var vWind = diff <= 5 ? (1 - diff / 5) : 0;
+    // 2. Wind: 30°–0° (0° = max, 30° = min)
+    var vWind = diff <= 30 ? (1 - diff / 30) : 0;
     setGain(tracks.wind.gain, vWind);
+
+    // 3. Birds: 5°–0° (0° = max, 5° = min，定位最准时)
+    var vBirds = diff <= 5 ? (1 - diff / 5) : 0;
+    setGain(tracks.birds.gain, vBirds);
 
     // 更新 UI
     document.getElementById('player-heading').textContent = Math.round(filteredHeading) + '°';

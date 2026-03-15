@@ -3,453 +3,200 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="mobile-web-app-capable" content="yes" />
   <title>Compass — Find the direction</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     html, body {
-      margin: 0;
-      padding: 0;
-      min-height: 100vh;
-      min-height: -webkit-fill-available;
-      background: #fff;
-      color: #111;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0; padding: 0; min-height: 100vh;
+      background: #fff; color: #111;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
       -webkit-font-smoothing: antialiased;
-      -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
-      overflow-x: hidden;
+      touch-action: manipulation; overflow-x: hidden;
     }
-    body {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 1rem;
-      padding-bottom: env(safe-area-inset-bottom);
-    }
-    .page {
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      max-width: 420px;
-      min-height: 60vh;
-      text-align: center;
-    }
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; }
+    .page { display: none; flex-direction: column; align-items: center; justify-content: center; width: 100%; max-width: 420px; text-align: center; }
     .page.active { display: flex; }
-    h1 {
-      font-size: 1.5rem;
-      font-weight: 600;
-      margin: 0 0 0.5rem;
-      color: #111;
-    }
-    .sub {
-      font-size: 0.9rem;
-      color: #666;
-      margin-bottom: 1.5rem;
-    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .sub { font-size: 0.9rem; color: #666; margin-bottom: 1.5rem; }
     .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 56px;
-      min-width: 200px;
-      padding: 1rem 2rem;
-      font-size: 1.25rem;
-      font-weight: 600;
-      color: #fff;
-      background: #111;
-      border: none;
-      border-radius: 12px;
-      cursor: pointer;
-      -webkit-appearance: none;
-      appearance: none;
-      touch-action: manipulation;
-      user-select: none;
-      transition: transform 0.1s ease, opacity 0.2s ease;
+      display: inline-flex; align-items: center; justify-content: center;
+      min-height: 56px; min-width: 200px; padding: 1rem 2rem;
+      font-size: 1.25rem; font-weight: 600; color: #fff;
+      background: #111; border: none; border-radius: 12px; cursor: pointer;
     }
-    .btn:active { transform: scale(0.98); opacity: 0.9; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-secondary {
-      margin-top: 1rem;
-      background: #333;
-      font-size: 1rem;
-    }
-    .heading-display {
-      font-size: 2.5rem;
-      font-weight: 700;
-      margin: 1rem 0;
-      color: #111;
-      letter-spacing: -0.02em;
-    }
-    .heading-display.waiting {
-      font-size: 1.25rem;
-      font-weight: 500;
-      color: #666;
-    }
-    .angle-diff {
-      font-size: 1.1rem;
-      color: #666;
-      margin-top: 0.5rem;
-    }
-    .status {
-      font-size: 0.85rem;
-      color: #666;
-      margin-top: 0.5rem;
-    }
-    .error { color: #c00; }
-    .btn-row { margin-top: 0.5rem; }
+    .btn-secondary { margin-top: 1rem; background: #333; font-size: 1rem; }
+    .heading-display { font-size: 2.5rem; font-weight: 700; margin: 1rem 0; }
+    .status { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
+    .btn-row { margin-top: 1rem; display: flex; gap: 10px; }
   </style>
 </head>
 <body>
-  <!-- Page 1: Admin Setup -->
+
   <section id="page-setup" class="page active">
-    <h1>Compass</h1>
-    <p class="sub">Enable sensors, lock a direction, then hand the phone to the player.</p>
-    <button id="btn-enable-sensors" class="btn" type="button">Enable Sensors</button>
-    <p id="setup-heading" class="heading-display waiting">— °</p>
-    <button id="btn-lock" class="btn btn-secondary" type="button" style="display:none;">Lock Direction</button>
-    <button id="btn-next" class="btn btn-secondary" type="button" style="display:none;">Next</button>
-    <p id="setup-status" class="status">Tap "Enable Sensors" to use the compass.</p>
-    <div id="test-controls-setup" style="display:none; margin-top:1rem; padding:0.75rem; background:#f5f5f5; border-radius:8px; font-size:0.85rem;">
-      <strong>Test mode</strong> (no compass): simulate heading
-      <input type="range" id="test-heading-setup" min="0" max="360" value="0" style="display:block; width:100%; margin-top:0.25rem;">
-      <span id="test-heading-value-setup">0</span>°
-    </div>
+    <h1>Compass Setup</h1>
+    <p class="sub">Enable sensors and lock a direction.</p>
+    <button id="btn-enable-sensors" class="btn">Enable Sensors</button>
+    <p id="setup-heading" class="heading-display">— °</p>
+    <button id="btn-lock" class="btn btn-secondary" style="display:none;">Lock Direction</button>
+    <button id="btn-next" class="btn btn-secondary" style="display:none;">Next</button>
+    <p id="setup-status" class="status">Waiting for sensors...</p>
   </section>
 
-  <!-- Page 2: Player Game -->
   <section id="page-player" class="page">
-    <h1>Find the direction</h1>
-    <p id="player-sub" class="sub">Point the phone toward the locked direction. Volume = how close you are.</p>
-    <div id="player-display" class="player-display" style="display:none;">
-      <p id="player-heading" class="heading-display">— °</p>
-      <p id="player-diff" class="angle-diff">— ° off</p>
+    <h1 id="player-title">Find the Direction</h1>
+    <p id="player-sub" class="sub">Volume = proximity. Wind &lt; 30°, Birds &lt; 5°.</p>
+    <div id="player-ui">
+        <p id="player-heading" class="heading-display">— °</p>
+        <p id="player-diff" class="status">— ° off</p>
     </div>
-    <p id="player-status" class="status">Tap Start to begin</p>
-    <button id="btn-start" class="btn" type="button">Start</button>
-    <button id="btn-end" class="btn btn-secondary" type="button">End</button>
+    <button id="btn-start" class="btn">Start Game</button>
     <div class="btn-row">
-      <button id="btn-hide" class="btn btn-secondary" type="button">Hide</button>
-      <button id="btn-restart" class="btn btn-secondary" type="button">Restart</button>
-    </div>
-    <div id="test-controls-player" style="display:none; margin-top:1rem; padding:0.75rem; background:#f5f5f5; border-radius:8px; font-size:0.85rem;">
-      <strong>Test mode</strong>: drag to simulate heading (0° = loud, 180° off = silent)
-      <input type="range" id="test-heading-player" min="0" max="360" value="0" style="display:block; width:100%; margin-top:0.25rem;">
-      <span id="test-heading-value-player">0</span>°
+        <button id="btn-hide" class="btn btn-secondary">Hide UI</button>
+        <button id="btn-restart" class="btn btn-secondary">Restart</button>
     </div>
   </section>
 
-  <script>
+<script>
 (function () {
   'use strict';
 
-  var AUDIO_RIVER = 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/nature/river.mp3';
-  var AUDIO_BIRDS = 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/animals/birds.mp3';
-  var AUDIO_WIND = 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/nature/wind.mp3';
-  var WIND_ANGLE_MAX = 5;  // Wind only when diff <= 5°; 0° = max vol, 5° = min vol
-  var BIRDS_ANGLE_MAX = 30;  // birds only when diff <= 30°; 0° = max vol, 30° = min vol
-  var EMA_ALPHA = 0.12;  // Low-pass: smaller = smoother (less jitter), more lag
+  var AUDIO_SOURCES = {
+    river: 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/nature/river.mp3',
+    birds: 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/animals/birds.mp3',
+    wind: 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/nature/wind.mp3'
+  };
 
-  var targetHeading = null;       // 0–360, locked in setup
-  var filteredHeading = null;     // EMA-smoothed current heading
-  var orientationListener = null; 
-  var sensorsEnabled = false;
-  var audioRiver = null;
-  var audioBirds = null;
-  var audioWind = null;
-  var audioUnlocked = false;
+  var targetHeading = null;
+  var filteredHeading = null;
+  var EMA_ALPHA = 0.15;
   var gameStarted = false;
-  var playerUIVisible = true;  // false when Hide clicked
-  var rafId = null;
-  var testMode = /[?&]test=1/.test(location.search);
+  var uiVisible = true;
 
-  var pageSetup = document.getElementById('page-setup');
-  var pagePlayer = document.getElementById('page-player');
-  var btnEnableSensors = document.getElementById('btn-enable-sensors');
-  var btnLock = document.getElementById('btn-lock');
-  var btnNext = document.getElementById('btn-next');
-  var btnStart = document.getElementById('btn-start');
-  var btnEnd = document.getElementById('btn-end');
-  var btnHide = document.getElementById('btn-hide');
-  var btnRestart = document.getElementById('btn-restart');
-  var playerSub = document.getElementById('player-sub');
-  var setupHeading = document.getElementById('setup-heading');
-  var setupStatus = document.getElementById('setup-status');
-  var playerDisplay = document.getElementById('player-display');
-  var playerHeading = document.getElementById('player-heading');
-  var playerDiff = document.getElementById('player-diff');
-  var playerStatus = document.getElementById('player-status');
-  var testHeadingSetup = document.getElementById('test-heading-setup');
-  var testHeadingValueSetup = document.getElementById('test-heading-value-setup');
-  var testHeadingPlayer = document.getElementById('test-heading-player');
-  var testHeadingValuePlayer = document.getElementById('test-heading-value-player');
+  // Web Audio 变量
+  var audioCtx = null;
+  var tracks = { river: null, birds: null, wind: null };
 
-  if (testMode) {
-    document.getElementById('test-controls-setup').style.display = 'block';
-    document.getElementById('test-controls-player').style.display = 'block';
-    testHeadingSetup.addEventListener('input', function () {
-      var v = Number(testHeadingSetup.value);
-      filteredHeading = v;
-      testHeadingValueSetup.textContent = v;
-      if (pageSetup.classList.contains('active')) setupHeading.textContent = v + '°';
-    });
-    testHeadingPlayer.addEventListener('input', function () {
-      var v = Number(testHeadingPlayer.value);
-      filteredHeading = v;
-      testHeadingValuePlayer.textContent = v;
-      if (gameStarted) updatePlayerUI();
-    });
+  // --- 初始化音频系统 (关键：必须由用户点击触发) ---
+  function initAudioContext() {
+    if (audioCtx) return;
+    var AudioContext = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AudioContext();
+
+    // 批量初始化音轨
+    for (var key in AUDIO_SOURCES) {
+        var audio = new Audio(AUDIO_SOURCES[key]);
+        audio.crossOrigin = "anonymous";
+        audio.loop = true;
+        
+        var source = audioCtx.createMediaElementSource(audio);
+        var gainNode = audioCtx.createGain();
+        gainNode.gain.value = 0; // 初始静音
+
+        source.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        tracks[key] = { el: audio, gain: gainNode };
+    }
   }
 
-  // ——— Shortest angle difference (-180..180) ———
+  // --- 音量控制 (解决 iOS 不支持 .volume 的问题) ---
+  function updateVolumes() {
+    if (!audioCtx || !gameStarted) return;
+
+    var diff = Math.abs(shortestAngleDiff(filteredHeading, targetHeading));
+    
+    // 1. River: 180° = 0, 0° = 1
+    var vRiver = Math.pow(Math.max(0, 1 - diff / 180), 1.5);
+    setGain(tracks.river.gain, vRiver);
+
+    // 2. Wind: 30°–0° (0° = max, 30° = min)
+    var vWind = diff <= 30 ? (1 - diff / 30) : 0;
+    setGain(tracks.wind.gain, vWind);
+
+    // 3. Birds: 5°–0° (0° = max, 5° = min，定位最准时)
+    var vBirds = diff <= 5 ? (1 - diff / 5) : 0;
+    setGain(tracks.birds.gain, vBirds);
+
+    // 更新 UI
+    document.getElementById('player-heading').textContent = Math.round(filteredHeading) + '°';
+    document.getElementById('player-diff').textContent = Math.round(diff) + '° off';
+  }
+
+  function setGain(gainNode, value) {
+    // setTargetAtTime 是 iOS 上最顺滑且不会崩溃的音量控制方式
+    gainNode.gain.setTargetAtTime(value, audioCtx.currentTime, 0.05);
+  }
+
+  // --- 传感器逻辑 ---
   function shortestAngleDiff(from, to) {
     var d = (to - from + 360) % 360;
     return d > 180 ? d - 360 : d;
   }
 
-  function normalize360(a) {
-    a = a % 360;
-    return a < 0 ? a + 360 : a;
+  function onOrientation(ev) {
+    var raw = ev.webkitCompassHeading || (360 - (ev.alpha || 0));
+    if (filteredHeading === null) filteredHeading = raw;
+    else {
+      var d = shortestAngleDiff(filteredHeading, raw);
+      filteredHeading = (filteredHeading + d * EMA_ALPHA + 360) % 360;
+    }
+
+    if (document.getElementById('page-setup').classList.contains('active')) {
+      document.getElementById('setup-heading').textContent = Math.round(filteredHeading) + '°';
+    }
+    if (gameStarted) updateVolumes();
   }
 
-  // ——— EMA filter for heading (handles wrap) ———
-  function filterHeading(next) {
-    if (next == null || isNaN(next)) return filteredHeading;
-    if (filteredHeading == null) return next;
-    var d = shortestAngleDiff(filteredHeading, next);
-    return normalize360(filteredHeading + EMA_ALPHA * d);
-  }
-
-  // ——— Raw heading from event (0–360) ———
-  function getHeadingFromEvent(ev) {
-    if (typeof ev.webkitCompassHeading === 'number' && !isNaN(ev.webkitCompassHeading))
-      return ev.webkitCompassHeading;
-    if (typeof ev.alpha === 'number' && !isNaN(ev.alpha)) {
-      var a = ev.alpha;
-      if (typeof ev.webkitCompassHeading === 'undefined' && typeof ev.absolute !== 'undefined' && ev.absolute === false)
-        a = 360 - a;
-      return normalize360(a);
-    }
-    return null;
-  }
-
-  function onDeviceOrientation(ev) {
-    if (testMode) return;
-    var raw = getHeadingFromEvent(ev);
-    if (raw == null) return;
-    filteredHeading = filterHeading(raw);
-    if (pageSetup.classList.contains('active')) {
-      setupHeading.textContent = Math.round(filteredHeading) + '°';
-      setupHeading.classList.remove('waiting');
-    }
-    if (pagePlayer.classList.contains('active') && gameStarted) {
-      updatePlayerUI();
-    }
-  }
-
-  function updatePlayerUI() {
-    if (filteredHeading == null || targetHeading == null) return;
-    var diff = Math.abs(shortestAngleDiff(filteredHeading, targetHeading));
-    playerHeading.textContent = Math.round(filteredHeading) + '°';
-    playerDiff.textContent = Math.round(diff) + '° off';
-    // 0° = vol 1.0 (max), 180° = vol 0 (silent). Steep curve so turning changes volume clearly.
-    var vol;
-    if (diff >= 180) {
-      vol = 0;
-    } else {
-      var linear = 1 - diff / 180;
-      vol = Math.pow(linear, 1.5);
-    }
-    vol = Math.max(0, Math.min(1, vol));
-    if (audioRiver) audioRiver.volume = vol;
-    // Birds: only when diff <= 30°; 0° = vol 1, 30° = vol 0; >30° = pause
-    if (audioBirds) {
-      if (diff <= BIRDS_ANGLE_MAX) {
-        var volBirds = 1 - diff / BIRDS_ANGLE_MAX;
-        audioBirds.volume = Math.max(0, Math.min(1, volBirds));
-        if (audioBirds.paused && gameStarted) {
-          audioBirds.currentTime = 0;
-          audioBirds.play().catch(function () {});
-        }
-      } else {
-        audioBirds.pause();
-        audioBirds.currentTime = 0;
-      }
-    }
-    // Wind: only when diff <= 5°; 0° = vol 1, 5° = vol 0; >5° = pause
-    if (audioWind) {
-      if (diff <= WIND_ANGLE_MAX) {
-        var volWind = 1 - diff / WIND_ANGLE_MAX;
-        audioWind.volume = Math.max(0, Math.min(1, volWind));
-        if (audioWind.paused && gameStarted) {
-          audioWind.currentTime = 0;
-          audioWind.play().catch(function () {});
-        }
-      } else {
-        audioWind.pause();
-        audioWind.currentTime = 0;
-      }
-    }
-  }
-
-  function startWatchingOrientation() {
-    if (orientationListener) return;
-    var eventName = typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'
-      ? 'deviceorientation'
-      : (window.DeviceOrientationEvent && 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation');
-    orientationListener = onDeviceOrientation;
-    window.addEventListener(eventName, orientationListener, { passive: true });
-    sensorsEnabled = true;
-    setSetupStatus('Rotate your phone. When ready, tap "Lock Direction".');
-    btnLock.style.display = 'inline-flex';
-    btnNext.style.display = 'inline-flex';
-  }
-
-  function requestPermissionAndStart() {
-    if (typeof DeviceOrientationEvent === 'undefined' || typeof DeviceOrientationEvent.requestPermission !== 'function') {
-      startWatchingOrientation();
-      return;
-    }
-    DeviceOrientationEvent.requestPermission()
-      .then(function (state) {
-        if (state === 'granted') startWatchingOrientation();
-        else setSetupStatus('Permission denied. Enable Motion & Orientation in Settings.', true);
-      })
-      .catch(function (err) {
-        setSetupStatus('Could not request permission: ' + (err && err.message ? err.message : 'unknown'), true);
+  // --- 按钮事件 ---
+  document.getElementById('btn-enable-sensors').addEventListener('click', function() {
+    initAudioContext(); // 用户点击瞬间解锁 Web Audio
+    
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission().then(function(res) {
+        if (res === 'granted') window.addEventListener('deviceorientation', onOrientation);
       });
-  }
-
-  function setSetupStatus(msg, isError) {
-    setupStatus.textContent = msg || '';
-    setupStatus.className = 'status' + (isError ? ' error' : '');
-  }
-
-  function showPage(pageEl) {
-    pageSetup.classList.remove('active');
-    pagePlayer.classList.remove('active');
-    pageEl.classList.add('active');
-  }
-
-  function createAudio(url) {
-    var a = new Audio(url);
-    a.preload = 'auto';
-    a.loop = true;
-    return a;
-  }
-
-  function startRiver() {
-    if (!audioRiver) audioRiver = createAudio(AUDIO_RIVER);
-    if (!audioBirds) audioBirds = createAudio(AUDIO_BIRDS);
-    if (!audioWind) audioWind = createAudio(AUDIO_WIND);
-    audioUnlocked = true;
-    var vol = 1;
-    var diff = 180;
-    if (filteredHeading != null && targetHeading != null) {
-      diff = Math.abs(shortestAngleDiff(filteredHeading, targetHeading));
-      vol = diff >= 180 ? 0 : Math.pow(Math.max(0, 1 - diff / 180), 1.5);
-    }
-    audioRiver.volume = vol;
-    audioRiver.currentTime = 0;
-    audioRiver.play().catch(function () {});
-    if (diff <= BIRDS_ANGLE_MAX) {
-      audioBirds.volume = 1 - diff / BIRDS_ANGLE_MAX;
-      audioBirds.currentTime = 0;
-      audioBirds.play().catch(function () {});
     } else {
-      audioBirds.pause();
-      audioBirds.currentTime = 0;
+      window.addEventListener('deviceorientation', onOrientation);
     }
-    if (diff <= WIND_ANGLE_MAX) {
-      audioWind.volume = 1 - diff / WIND_ANGLE_MAX;
-      audioWind.currentTime = 0;
-      audioWind.play().catch(function () {});
-    } else {
-      audioWind.pause();
-      audioWind.currentTime = 0;
-    }
-  }
-
-  function stopRiver() {
-    if (audioRiver) {
-      audioRiver.pause();
-      audioRiver.currentTime = 0;
-    }
-    if (audioBirds) {
-      audioBirds.pause();
-      audioBirds.currentTime = 0;
-    }
-    if (audioWind) {
-      audioWind.pause();
-      audioWind.currentTime = 0;
-    }
-  }
-
-  btnEnableSensors.addEventListener('click', function () {
-    if (testMode) {
-      filteredHeading = Number(testHeadingSetup.value);
-      setupHeading.textContent = Math.round(filteredHeading) + '°';
-      setupHeading.classList.remove('waiting');
-      setSetupStatus('Test mode: move slider, then Lock Direction.');
-      btnLock.style.display = 'inline-flex';
-      btnNext.style.display = 'inline-flex';
-      return;
-    }
-    requestPermissionAndStart();
+    
+    this.style.display = 'none';
+    document.getElementById('btn-lock').style.display = 'inline-flex';
+    document.getElementById('btn-next').style.display = 'inline-flex';
+    document.getElementById('setup-status').textContent = 'Sensors active. Rotate and lock.';
   });
 
-  btnLock.addEventListener('click', function () {
-    if (filteredHeading != null) {
-      targetHeading = Math.round(filteredHeading);
-      setSetupStatus('Locked at ' + targetHeading + '°. Tap Next to continue.');
-    }
+  document.getElementById('btn-lock').addEventListener('click', function() {
+    targetHeading = Math.round(filteredHeading);
+    document.getElementById('setup-status').textContent = 'Target Locked: ' + targetHeading + '°';
   });
 
-  btnNext.addEventListener('click', function () {
-    if (targetHeading == null) {
-      setSetupStatus('Tap "Lock Direction" first.', true);
-      return;
-    }
-    showPage(pagePlayer);
+  document.getElementById('btn-next').addEventListener('click', function() {
+    document.getElementById('page-setup').classList.remove('active');
+    document.getElementById('page-player').classList.add('active');
   });
 
-  btnHide.addEventListener('click', function () {
-    playerUIVisible = !playerUIVisible;
-    playerSub.style.display = playerUIVisible ? '' : 'none';
-    playerDisplay.style.display = (playerUIVisible && gameStarted) ? 'block' : 'none';
-    btnHide.textContent = playerUIVisible ? 'Hide' : 'Show';
-  });
-
-  btnStart.addEventListener('click', function () {
+  document.getElementById('btn-start').addEventListener('click', function() {
     gameStarted = true;
-    playerDisplay.style.display = playerUIVisible ? 'block' : 'none';
-    if (testMode) {
-      filteredHeading = Number(testHeadingPlayer.value);
-      testHeadingValuePlayer.textContent = Math.round(filteredHeading);
-      testHeadingPlayer.value = filteredHeading;
-      playerStatus.textContent = 'Test mode: drag slider. 0° off = loud, 180° off = silent.';
-    } else {
-      playerStatus.textContent = 'Point toward the green marker. Volume = closeness.';
-    }
-    startRiver();
-    updatePlayerUI();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    
+    // 同时启动所有音轨
+    for (var key in tracks) { tracks[key].el.play(); }
+    
+    this.style.display = 'none';
+    updateVolumes();
   });
 
-  btnEnd.addEventListener('click', function () {
-    gameStarted = false;
-    stopRiver();
-    playerStatus.textContent = 'Ended. Tap Start again or Restart.';
+  document.getElementById('btn-hide').addEventListener('click', function() {
+    uiVisible = !uiVisible;
+    document.getElementById('player-ui').style.opacity = uiVisible ? '1' : '0';
+    this.textContent = uiVisible ? 'Hide UI' : 'Show UI';
   });
 
-  btnRestart.addEventListener('click', function () {
+  document.getElementById('btn-restart').addEventListener('click', function() {
     window.location.reload();
   });
 
 })();
-  </script>
+</script>
 </body>
 </html>
