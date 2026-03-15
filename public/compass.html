@@ -90,41 +90,6 @@
       font-weight: 500;
       color: #666;
     }
-    .compass-ring {
-      width: 220px;
-      height: 220px;
-      margin: 1.5rem auto;
-      position: relative;
-      border: 4px solid #111;
-      border-radius: 50%;
-      background: #fff;
-    }
-    .compass-needle {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      width: 6px;
-      height: 48%;
-      margin-left: -3px;
-      margin-top: -48%;
-      background: #111;
-      border-radius: 3px;
-      transform-origin: 50% 100%;
-      transition: transform 0.08s ease-out;
-    }
-    .compass-target {
-      position: absolute;
-      left: 50%;
-      top: 12%;
-      width: 0;
-      height: 0;
-      margin-left: -8px;
-      border-left: 8px solid transparent;
-      border-right: 8px solid transparent;
-      border-top: 20px solid #0a0;
-      transform-origin: 50% 100%;
-      transition: transform 0.08s ease-out;
-    }
     .angle-diff {
       font-size: 1.1rem;
       color: #666;
@@ -149,17 +114,18 @@
     <button id="btn-lock" class="btn btn-secondary" type="button" style="display:none;">Lock Direction</button>
     <button id="btn-next" class="btn btn-secondary" type="button" style="display:none;">Next</button>
     <p id="setup-status" class="status">Tap "Enable Sensors" to use the compass.</p>
+    <div id="test-controls-setup" style="display:none; margin-top:1rem; padding:0.75rem; background:#f5f5f5; border-radius:8px; font-size:0.85rem;">
+      <strong>Test mode</strong> (no compass): simulate heading
+      <input type="range" id="test-heading-setup" min="0" max="360" value="0" style="display:block; width:100%; margin-top:0.25rem;">
+      <span id="test-heading-value-setup">0</span>°
+    </div>
   </section>
 
   <!-- Page 2: Player Game -->
   <section id="page-player" class="page">
     <h1>Find the direction</h1>
-    <p class="sub">Point the phone toward the locked direction. Volume = how close you are.</p>
+    <p id="player-sub" class="sub">Point the phone toward the locked direction. Volume = how close you are.</p>
     <div id="player-display" class="player-display" style="display:none;">
-      <div class="compass-ring">
-        <div id="compass-needle" class="compass-needle"></div>
-        <div id="compass-target" class="compass-target"></div>
-      </div>
       <p id="player-heading" class="heading-display">— °</p>
       <p id="player-diff" class="angle-diff">— ° off</p>
     </div>
@@ -167,7 +133,13 @@
     <button id="btn-start" class="btn" type="button">Start</button>
     <button id="btn-end" class="btn btn-secondary" type="button">End</button>
     <div class="btn-row">
+      <button id="btn-hide" class="btn btn-secondary" type="button">Hide</button>
       <button id="btn-restart" class="btn btn-secondary" type="button">Restart</button>
+    </div>
+    <div id="test-controls-player" style="display:none; margin-top:1rem; padding:0.75rem; background:#f5f5f5; border-radius:8px; font-size:0.85rem;">
+      <strong>Test mode</strong>: drag to simulate heading (0° = loud, 180° off = silent)
+      <input type="range" id="test-heading-player" min="0" max="360" value="0" style="display:block; width:100%; margin-top:0.25rem;">
+      <span id="test-heading-value-player">0</span>°
     </div>
   </section>
 
@@ -176,18 +148,24 @@
   'use strict';
 
   var AUDIO_RIVER = 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/nature/river.mp3';
+  var AUDIO_BIRDS = 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/animals/birds.mp3';
+  var AUDIO_WIND = 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/nature/wind.mp3';
+  var WIND_ANGLE_MAX = 5;  // Wind only when diff <= 5°; 0° = max vol, 5° = min vol
+  var BIRDS_ANGLE_MAX = 30;  // birds only when diff <= 30°; 0° = max vol, 30° = min vol
   var EMA_ALPHA = 0.12;  // Low-pass: smaller = smoother (less jitter), more lag
 
   var targetHeading = null;       // 0–360, locked in setup
   var filteredHeading = null;     // EMA-smoothed current heading
   var orientationListener = null;
   var sensorsEnabled = false;
-  var audioRiver = null;         // HTML Audio element (for loading/looping)
-  var audioContext = null;       // Web Audio API
-  var gainNode = null;           // gain = volume from angle
+  var audioRiver = null;
+  var audioBirds = null;
+  var audioWind = null;
   var audioUnlocked = false;
   var gameStarted = false;
+  var playerUIVisible = true;  // false when Hide clicked
   var rafId = null;
+  var testMode = /[?&]test=1/.test(location.search);
 
   var pageSetup = document.getElementById('page-setup');
   var pagePlayer = document.getElementById('page-player');
@@ -196,15 +174,36 @@
   var btnNext = document.getElementById('btn-next');
   var btnStart = document.getElementById('btn-start');
   var btnEnd = document.getElementById('btn-end');
+  var btnHide = document.getElementById('btn-hide');
   var btnRestart = document.getElementById('btn-restart');
+  var playerSub = document.getElementById('player-sub');
   var setupHeading = document.getElementById('setup-heading');
   var setupStatus = document.getElementById('setup-status');
   var playerDisplay = document.getElementById('player-display');
   var playerHeading = document.getElementById('player-heading');
   var playerDiff = document.getElementById('player-diff');
   var playerStatus = document.getElementById('player-status');
-  var compassNeedle = document.getElementById('compass-needle');
-  var compassTarget = document.getElementById('compass-target');
+  var testHeadingSetup = document.getElementById('test-heading-setup');
+  var testHeadingValueSetup = document.getElementById('test-heading-value-setup');
+  var testHeadingPlayer = document.getElementById('test-heading-player');
+  var testHeadingValuePlayer = document.getElementById('test-heading-value-player');
+
+  if (testMode) {
+    document.getElementById('test-controls-setup').style.display = 'block';
+    document.getElementById('test-controls-player').style.display = 'block';
+    testHeadingSetup.addEventListener('input', function () {
+      var v = Number(testHeadingSetup.value);
+      filteredHeading = v;
+      testHeadingValueSetup.textContent = v;
+      if (pageSetup.classList.contains('active')) setupHeading.textContent = v + '°';
+    });
+    testHeadingPlayer.addEventListener('input', function () {
+      var v = Number(testHeadingPlayer.value);
+      filteredHeading = v;
+      testHeadingValuePlayer.textContent = v;
+      if (gameStarted) updatePlayerUI();
+    });
+  }
 
   // ——— Shortest angle difference (-180..180) ———
   function shortestAngleDiff(from, to) {
@@ -239,6 +238,7 @@
   }
 
   function onDeviceOrientation(ev) {
+    if (testMode) return;
     var raw = getHeadingFromEvent(ev);
     if (raw == null) return;
     filteredHeading = filterHeading(raw);
@@ -265,11 +265,35 @@
       vol = Math.pow(linear, 1.5);
     }
     vol = Math.max(0, Math.min(1, vol));
-    if (gainNode) {
-      gainNode.gain.setTargetAtTime(vol, audioContext.currentTime, 0.04);
+    if (audioRiver) audioRiver.volume = vol;
+    // Birds: only when diff <= 30°; 0° = vol 1, 30° = vol 0; >30° = pause
+    if (audioBirds) {
+      if (diff <= BIRDS_ANGLE_MAX) {
+        var volBirds = 1 - diff / BIRDS_ANGLE_MAX;
+        audioBirds.volume = Math.max(0, Math.min(1, volBirds));
+        if (audioBirds.paused && gameStarted) {
+          audioBirds.currentTime = 0;
+          audioBirds.play().catch(function () {});
+        }
+      } else {
+        audioBirds.pause();
+        audioBirds.currentTime = 0;
+      }
     }
-    compassNeedle.style.transform = 'rotate(' + filteredHeading + 'deg)';
-    compassTarget.style.transform = 'rotate(' + targetHeading + 'deg)';
+    // Wind: only when diff <= 5°; 0° = vol 1, 5° = vol 0; >5° = pause
+    if (audioWind) {
+      if (diff <= WIND_ANGLE_MAX) {
+        var volWind = 1 - diff / WIND_ANGLE_MAX;
+        audioWind.volume = Math.max(0, Math.min(1, volWind));
+        if (audioWind.paused && gameStarted) {
+          audioWind.currentTime = 0;
+          audioWind.play().catch(function () {});
+        }
+      } else {
+        audioWind.pause();
+        audioWind.currentTime = 0;
+      }
+    }
   }
 
   function startWatchingOrientation() {
@@ -320,21 +344,34 @@
 
   function startRiver() {
     if (!audioRiver) audioRiver = createAudio(AUDIO_RIVER);
+    if (!audioBirds) audioBirds = createAudio(AUDIO_BIRDS);
+    if (!audioWind) audioWind = createAudio(AUDIO_WIND);
     audioUnlocked = true;
-    var Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!audioContext && Ctx) {
-      audioContext = new Ctx();
-      var source = audioContext.createMediaElementSource(audioRiver);
-      gainNode = audioContext.createGain();
-      gainNode.gain.value = 0;
-      source.connect(gainNode);
-      gainNode.connect(audioContext.destination);
+    var vol = 1;
+    var diff = 180;
+    if (filteredHeading != null && targetHeading != null) {
+      diff = Math.abs(shortestAngleDiff(filteredHeading, targetHeading));
+      vol = diff >= 180 ? 0 : Math.pow(Math.max(0, 1 - diff / 180), 1.5);
     }
-    if (audioContext && audioContext.state === 'suspended') {
-      audioContext.resume();
-    }
+    audioRiver.volume = vol;
     audioRiver.currentTime = 0;
     audioRiver.play().catch(function () {});
+    if (diff <= BIRDS_ANGLE_MAX) {
+      audioBirds.volume = 1 - diff / BIRDS_ANGLE_MAX;
+      audioBirds.currentTime = 0;
+      audioBirds.play().catch(function () {});
+    } else {
+      audioBirds.pause();
+      audioBirds.currentTime = 0;
+    }
+    if (diff <= WIND_ANGLE_MAX) {
+      audioWind.volume = 1 - diff / WIND_ANGLE_MAX;
+      audioWind.currentTime = 0;
+      audioWind.play().catch(function () {});
+    } else {
+      audioWind.pause();
+      audioWind.currentTime = 0;
+    }
   }
 
   function stopRiver() {
@@ -342,10 +379,26 @@
       audioRiver.pause();
       audioRiver.currentTime = 0;
     }
-    if (gainNode) gainNode.gain.setTargetAtTime(0, (audioContext && audioContext.currentTime) || 0, 0.02);
+    if (audioBirds) {
+      audioBirds.pause();
+      audioBirds.currentTime = 0;
+    }
+    if (audioWind) {
+      audioWind.pause();
+      audioWind.currentTime = 0;
+    }
   }
 
   btnEnableSensors.addEventListener('click', function () {
+    if (testMode) {
+      filteredHeading = Number(testHeadingSetup.value);
+      setupHeading.textContent = Math.round(filteredHeading) + '°';
+      setupHeading.classList.remove('waiting');
+      setSetupStatus('Test mode: move slider, then Lock Direction.');
+      btnLock.style.display = 'inline-flex';
+      btnNext.style.display = 'inline-flex';
+      return;
+    }
     requestPermissionAndStart();
   });
 
@@ -364,10 +417,24 @@
     showPage(pagePlayer);
   });
 
+  btnHide.addEventListener('click', function () {
+    playerUIVisible = !playerUIVisible;
+    playerSub.style.display = playerUIVisible ? '' : 'none';
+    playerDisplay.style.display = (playerUIVisible && gameStarted) ? 'block' : 'none';
+    btnHide.textContent = playerUIVisible ? 'Hide' : 'Show';
+  });
+
   btnStart.addEventListener('click', function () {
     gameStarted = true;
-    playerDisplay.style.display = 'block';
-    playerStatus.textContent = 'Point toward the green marker. Volume = closeness.';
+    playerDisplay.style.display = playerUIVisible ? 'block' : 'none';
+    if (testMode) {
+      filteredHeading = Number(testHeadingPlayer.value);
+      testHeadingValuePlayer.textContent = Math.round(filteredHeading);
+      testHeadingPlayer.value = filteredHeading;
+      playerStatus.textContent = 'Test mode: drag slider. 0° off = loud, 180° off = silent.';
+    } else {
+      playerStatus.textContent = 'Point toward the green marker. Volume = closeness.';
+    }
     startRiver();
     updatePlayerUI();
   });
