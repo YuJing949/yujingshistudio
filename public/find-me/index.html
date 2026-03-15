@@ -136,9 +136,11 @@
   var AUDIO_RIVER = 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/nature/river.mp3';
   var AUDIO_BIRDS = 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/animals/birds.mp3';
   var EMA_ALPHA = 0.85;  // Higher = faster response to movement (0.75 balances smoothness vs lag)
-  var MAX_VOLUME_M = 1.5;   // Distance at which volume is max (1); min volume at startDistanceM
+  var MAX_VOLUME_M = 2;     // River at max volume when within this (m)
+  var VOLUME_CURVE = 0.45;  // Power curve: smaller = steeper (distance→volume more dramatic)
   var FOUND_ENTER_M = 1.2;  // Hysteresis: show "Found it!" when below this
   var FOUND_LEAVE_M = 1.8;  // Hysteresis: hide "Found it!" when above this
+  var BIRDS_FULL_VOLUME_M = 1.5;  // Birds at full volume when within this (m)
 
   // ——— State ———
   var target = null;       // { lat, lon }
@@ -224,18 +226,21 @@
     if (audioBirds) { audioBirds.pause(); audioBirds.currentTime = 0; }
   }
 
-  // ——— Volume from distance (min vol at startDistanceM, max vol at 1.5m) ———
+  // ——— Volume from distance: steeper curve so change is more dramatic ———
   function volumeFromDistance(distanceM) {
     if (startDistanceM == null) return 0;
     if (distanceM <= MAX_VOLUME_M) return 1;
     if (startDistanceM <= MAX_VOLUME_M) return 1;
     if (distanceM >= startDistanceM) return 0;
-    return 1 - (distanceM - MAX_VOLUME_M) / (startDistanceM - MAX_VOLUME_M);
+    var linear = 1 - (distanceM - MAX_VOLUME_M) / (startDistanceM - MAX_VOLUME_M);
+    return Math.pow(Math.max(0, linear), VOLUME_CURVE);
   }
 
+  // ——— Birds: full volume when close, more noticeable ———
   function birdsVolumeFromDistance(distanceM) {
-    if (distanceM >= MAX_VOLUME_M) return 0;
-    return 1 - distanceM / MAX_VOLUME_M;
+    if (distanceM >= BIRDS_FULL_VOLUME_M) return 0;
+    if (distanceM <= 0.5) return 1;
+    return 0.4 + 0.6 * (1 - (distanceM - 0.5) / (BIRDS_FULL_VOLUME_M - 0.5));
   }
 
   // ——— UI ———
