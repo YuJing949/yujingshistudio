@@ -34,19 +34,19 @@
     /* Player page: left-aligned layout */
     #page-player.page.active { flex-direction: column; align-items: stretch; text-align: left; min-height: 100vh; padding-bottom: 30px; padding-left: 0; }
     #page-player .page-player-top { width: 100%; text-align: left; margin-bottom: 0.5rem; padding-left: 0; }
-    #page-player .page-player-top h1 { margin-left: 0; padding-left: 0; }
+    #page-player .page-player-top h1 { margin-left: 0; padding-left: 0; padding-top: 1rem; }
     #page-player .page-player-center { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; text-align: left; width: 100%; }
     #page-player .long-press-hint { font-family: 'Noto Sans', sans-serif; font-weight: 300; font-size: 1.15rem; color: #111; margin-top: 1rem; }
     #page-player .player-diff-only { font-family: 'Noto Sans', sans-serif; font-weight: 700; font-size: 2rem; margin: 0; color: #111; }
-      /* 1. 确保按钮容器完全靠左，没有内边距干扰 */
+    /* 1. 确保按钮容器完全靠左，没有内边距干扰 */
   #page-player .btn-row {
     margin-top: auto;
     padding-top: 1.5rem;
-    padding-bottom: 30px; /* 留出安全区域 */
+    padding-bottom: 1rem; /* 留出安全区域 */
     padding-left: 0;      /* 确保容器本身不缩进 */
     display: flex;
     flex-direction: column;
-    gap: 15px;            /* 按钮之间的间距 */
+    gap: 10px;            /* 按钮之间的间距 */
     align-items: flex-start;
   }
 
@@ -57,7 +57,7 @@
     font-size: 1.15rem;
     min-width: auto;
     min-height: auto;     /* 移除最小高度限制，让它更像纯文字链接 */
-    padding: 5px 0 5px 0; /* 上下留 5px，左右 0 使字形左边界与标题对齐 */
+    padding: 5px 0;       /* 上下留 5px 手感，左侧设为 0 以对齐 */
     text-align: left;
     border-radius: 0;     /* 纯文字模式不需要圆角 */
     justify-content: flex-start; /* 内部内容左对齐 */
@@ -74,11 +74,6 @@
     <button id="btn-lock" class="btn btn-secondary" style="display:none;">Lock Direction</button>
     <button id="btn-next" class="btn btn-secondary" style="display:none;">Next</button>
     <p id="setup-status" class="status">Waiting for sensors...</p>
-    <div id="test-setup" style="display:none; margin-top:1rem; padding:0.75rem; background:#f0f0f0; border-radius:8px; font-size:0.85rem; width:100%; max-width:280px;">
-      <strong>Test mode</strong> — simulate heading (no compass):
-      <input type="range" id="slider-setup" min="0" max="360" value="0" style="display:block; width:100%; margin:0.25rem 0;">
-      <span id="value-setup">0</span>°
-    </div>
   </section>
 
   <section id="page-player" class="page">
@@ -89,11 +84,6 @@
     <div class="page-player-center">
       <p id="player-diff" class="player-diff-only" style="display:none;">— ° off</p>
       <p class="long-press-hint">Long Press Anywhere for 2secs to Start or End.</p>
-    </div>
-    <div id="test-player" style="display:none; margin-top:1rem; padding:0.75rem; background:#f0f0f0; border-radius:8px; font-size:0.85rem; width:100%; max-width:280px;">
-      <strong>Test mode</strong> — drag to simulate heading (0° off = loud, 180° off = silent):
-      <input type="range" id="slider-player" min="0" max="360" value="0" style="display:block; width:100%; margin:0.25rem 0;">
-      <span id="value-player">0</span>°
     </div>
     <div class="btn-row">
       <button id="btn-show-direction" class="btn btn-secondary">Show Direction</button>
@@ -115,10 +105,9 @@
   var filteredHeading = null;
   var EMA_ALPHA = 0.15;
   var gameStarted = false;
-  var directionVisible = false;  // default: do not show "X° off"; click Show Direction to reveal
-  var testMode = /[?&]test=1/.test(location.search);
+  var directionVisible = false;
   var longPressTimer = null;
-  var LONG_PRESS_MS = 2000;  // 2 seconds for both touch and mouse
+  var LONG_PRESS_MS = 2000;
   var VIBRATE_MS = 1000;
 
   // Web Audio 变量
@@ -186,12 +175,7 @@
   }
 
   function onOrientation(ev) {
-    if (testMode) return;
-    var raw = (typeof ev.webkitCompassHeading === 'number' && !isNaN(ev.webkitCompassHeading))
-      ? ev.webkitCompassHeading
-      : (typeof ev.alpha === 'number' && !isNaN(ev.alpha) ? (360 - ev.alpha) : null);
-    if (raw == null || isNaN(raw)) return;
-    raw = ((raw % 360) + 360) % 360;
+    var raw = ev.webkitCompassHeading || (360 - (ev.alpha || 0));
     if (filteredHeading === null) filteredHeading = raw;
     else {
       var d = shortestAngleDiff(filteredHeading, raw);
@@ -205,57 +189,29 @@
   }
 
   // --- 按钮事件 ---
-  if (testMode) {
-    document.getElementById('test-setup').style.display = 'block';
-    document.getElementById('test-player').style.display = 'block';
-    document.getElementById('slider-setup').addEventListener('input', function() {
-      var v = Number(this.value);
-      filteredHeading = v;
-      document.getElementById('value-setup').textContent = v;
-      document.getElementById('setup-heading').textContent = v + '°';
-    });
-    document.getElementById('slider-player').addEventListener('input', function() {
-      var v = Number(this.value);
-      filteredHeading = v;
-      document.getElementById('value-player').textContent = v;
-      if (gameStarted) updateVolumes();
-    });
-  }
-
   document.getElementById('btn-enable-sensors').addEventListener('click', function() {
     initAudioContext(); // 用户点击瞬间解锁 Web Audio
     
-    if (testMode) {
-      filteredHeading = Number(document.getElementById('slider-setup').value);
-      document.getElementById('setup-heading').textContent = filteredHeading + '°';
-      document.getElementById('value-setup').textContent = filteredHeading;
-      document.getElementById('setup-status').textContent = 'Test mode: move slider, then Lock Direction.';
-    } else if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
       DeviceOrientationEvent.requestPermission().then(function(res) {
         if (res === 'granted') window.addEventListener('deviceorientation', onOrientation);
       });
-      document.getElementById('setup-status').textContent = 'Sensors active. Rotate and lock.';
     } else {
       window.addEventListener('deviceorientation', onOrientation);
-      document.getElementById('setup-status').textContent = 'Sensors active. Rotate and lock.';
     }
     
     this.style.display = 'none';
     document.getElementById('btn-lock').style.display = 'inline-flex';
     document.getElementById('btn-next').style.display = 'inline-flex';
+    document.getElementById('setup-status').textContent = 'Sensors active. Rotate and lock.';
   });
 
   document.getElementById('btn-lock').addEventListener('click', function() {
-    if (filteredHeading == null) return;
     targetHeading = Math.round(filteredHeading);
     document.getElementById('setup-status').textContent = 'Target Locked: ' + targetHeading + '°';
   });
 
   document.getElementById('btn-next').addEventListener('click', function() {
-    if (targetHeading == null) {
-      document.getElementById('setup-status').textContent = 'Please lock a direction first.';
-      return;
-    }
     document.getElementById('page-setup').classList.remove('active');
     document.getElementById('page-player').classList.add('active');
   });
@@ -263,11 +219,6 @@
   function doStartGame() {
     if (!audioCtx || targetHeading == null) return;
     gameStarted = true;
-    if (testMode) {
-      filteredHeading = Number(document.getElementById('slider-player').value);
-      document.getElementById('slider-player').value = filteredHeading;
-      document.getElementById('value-player').textContent = filteredHeading;
-    }
     if (audioCtx.state === 'suspended') audioCtx.resume();
     for (var key in tracks) { tracks[key].el.play(); }
     updateVolumes();
