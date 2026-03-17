@@ -242,12 +242,12 @@ export function Home() {
                   <div>
                     <p className="text-lg lg:text-xl text-gray-500 mb-2">Behance</p>
                     <a
-                      href="https://behance.net/yujingshi6"
+                      href="https://behance.net/yujingshi4"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="block text-lg lg:text-xl hover:opacity-60 transition-opacity"
                     >
-                      behance.net/yujingshi6
+                      behance.net/yujingshi4
                     </a>
                   </div>
                   <div>
