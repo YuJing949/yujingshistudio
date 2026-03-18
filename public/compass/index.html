@@ -100,12 +100,6 @@
 (function () {
   'use strict';
 
-  var AUDIO_SOURCES = {
-    river: 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/nature/river.mp3',
-    birds: 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/animals/birds.mp3',
-    wind: 'https://raw.githubusercontent.com/remvze/moodist/main/public/sounds/nature/wind.mp3'
-  };
-
   var targetHeading = null;
   var filteredHeading = null;
   var EMA_ALPHA = 0.15;
@@ -122,86 +116,138 @@
     events: { deviceorientation: 0, deviceorientationabsolute: 0 },
     last: { type: '', alpha: null, beta: null, gamma: null, webkitCompassHeading: null, absolute: null, ts: 0 }
   };
-
-  // Web Audio 变量
+  // Web Audio 变量（合成音效：440Hz 脉冲水滴 + 极微弱粉红噪音）
   var audioCtx = null;
-  var tracks = { river: null, birds: null, wind: null };
+  var noiseSource = null;
+  var noiseGain = null;
 
-  // --- 初始化音频系统 (关键：必须由用户点击触发) ---
+  var SINE_FREQ = 440;
+  var PULSE_DECAY_SEC = 0.1;
+  var PULSE_START_GAIN = 0.2;
+  var PULSE_END_GAIN = 0.0001; // 需要 > 0，供 exponentialRamp 用
+
+  var PULSE_MIN_INTERVAL_SEC = 0.08; // 对准目标：滴滴滴
+  var PULSE_MAX_INTERVAL_SEC = 1.0;  // 偏离目标：滴......滴......
+  var pulseIntervalSec = PULSE_MAX_INTERVAL_SEC;
+
+  var PINK_NOISE_BASE_GAIN = 0.00002;
+  var PINK_NOISE_SCALE_GAIN = 0.00012; // 随 diff 略增大（仍保持极弱）
+
+  var pulseTimer = null;
+
+  function createPinkNoiseBuffer(ctx, durationSec) {
+    var bufferSize = Math.max(1, Math.floor(ctx.sampleRate * durationSec));
+    var buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    var output = buffer.getChannelData(0);
+
+    var b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (var i = 0; i < bufferSize; i++) {
+      var white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      b3 = 0.86650 * b3 + white * 0.3104856;
+      b4 = 0.55000 * b4 + white * 0.5329522;
+      b5 = -0.7616 * b5 - white * 0.0168980;
+
+      var pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+      b6 = white * 0.115926;
+      output[i] = pink * 0.11;
+    }
+    return buffer;
+  }
+
   function initAudioContext() {
     if (audioCtx) return;
     var AudioContext = window.AudioContext || window.webkitAudioContext;
     audioCtx = new AudioContext();
 
-    // 批量初始化音轨
-    for (var key in AUDIO_SOURCES) {
-        var audio = new Audio(AUDIO_SOURCES[key]);
-        audio.crossOrigin = "anonymous";
-        audio.loop = true;
-        
-        var source = audioCtx.createMediaElementSource(audio);
-        var gainNode = audioCtx.createGain();
-        gainNode.gain.value = 0; // 初始静音
+    noiseGain = audioCtx.createGain();
+    noiseGain.gain.value = 0;
+    noiseGain.connect(audioCtx.destination);
 
-        source.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-        
-        tracks[key] = { el: audio, gain: gainNode };
-    }
+    noiseSource = audioCtx.createBufferSource();
+    noiseSource.buffer = createPinkNoiseBuffer(audioCtx, 2.0);
+    noiseSource.loop = true;
+    noiseSource.connect(noiseGain);
+    try { noiseSource.start(); } catch (e) {}
   }
 
-  // 用于 iOS/安卓的“先解锁音频，再允许后续手势外 play()”
+  // 页面点击后的“解锁”入口：resume + 轻微打开底噪（避免后续手势外无法响）
   function unlockAudioForBeta() {
     if (!audioCtx) return;
-    // 解锁 AudioContext（部分机型需要 resume）
     if (audioCtx.state === 'suspended') audioCtx.resume();
-
-    // 预加载并 play 一段“静音音频”（data URI silence）
-    try {
-      var silent = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=');
-      silent.preload = 'auto';
-      silent.volume = 0;
-      silent.play().catch(function() {});
-    } catch (e) {}
-
-    // 同时尝试预先 play 音轨（但由于 gain 初始为 0，不会有声音）
-    for (var key in tracks) {
-      try {
-        tracks[key].el.currentTime = 0;
-        tracks[key].el.play().catch(function() {});
-      } catch (e2) {}
+    if (noiseGain) {
+      noiseGain.gain.setTargetAtTime(PINK_NOISE_BASE_GAIN, audioCtx.currentTime, 0.05);
     }
   }
 
-  // --- 音量控制 (解决 iOS 不支持 .volume 的问题) ---
-  function updateVolumes() {
+  function playPulse(time) {
+    if (!audioCtx) return;
+    var osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(SINE_FREQ, time);
+
+    var g = audioCtx.createGain();
+    g.gain.setValueAtTime(PULSE_START_GAIN, time);
+    g.gain.exponentialRampToValueAtTime(Math.max(PULSE_END_GAIN, 0.00001), time + PULSE_DECAY_SEC);
+
+    osc.connect(g);
+    g.connect(audioCtx.destination);
+
+    osc.start(time);
+    osc.stop(time + PULSE_DECAY_SEC + 0.03);
+  }
+
+  function startPulseLoop() {
+    if (!audioCtx) return;
+    if (pulseTimer) clearTimeout(pulseTimer);
+
+    function tick() {
+      if (!gameStarted) return;
+      var t = audioCtx.currentTime + 0.015;
+      playPulse(t);
+      var delayMs = Math.max(0, pulseIntervalSec * 1000);
+      pulseTimer = setTimeout(tick, delayMs);
+    }
+
+    pulseTimer = setTimeout(tick, 10);
+  }
+
+  function stopPulseLoop() {
+    if (pulseTimer) {
+      clearTimeout(pulseTimer);
+      pulseTimer = null;
+    }
+    if (noiseGain) noiseGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+  }
+
+  function updatePlayerUI() {
     if (!audioCtx || !gameStarted) return;
     if (filteredHeading == null || targetHeading == null) return;
 
     var diff = Math.abs(shortestAngleDiff(filteredHeading, targetHeading));
     if (isNaN(diff)) return;
-    
-    // 1. River: 180° = 0, 0° = 1
-    var vRiver = Math.pow(Math.max(0, 1 - diff / 180), 1.5);
-    setGain(tracks.river.gain, vRiver);
-
-    // 2. Wind: 30°–0° (0° = max, 30° = min)
-    var vWind = diff <= 30 ? (1 - diff / 30) : 0;
-    setGain(tracks.wind.gain, vWind);
-
-    // 3. Birds: 5°–0° (0° = max, 5° = min，定位最准时)
-    var vBirds = diff <= 5 ? (1 - diff / 5) : 0;
-    setGain(tracks.birds.gain, vBirds);
 
     // 更新 UI（仅 ° off，默认不展示由 Show Direction 控制）
     var diffEl = document.getElementById('player-diff');
     diffEl.textContent = Math.round(diff) + '° off';
     if (directionVisible) diffEl.style.display = '';
+
+    // Tempo Mapping：根据 diff 映射脉冲间隔
+    var dev = Math.min(1, Math.max(0, diff / 180)); // 0..1
+    pulseIntervalSec = PULSE_MIN_INTERVAL_SEC + dev * (PULSE_MAX_INTERVAL_SEC - PULSE_MIN_INTERVAL_SEC);
+
+    // Pink Noise 底噪补偿：偏离越大，噪音略增大
+    if (noiseGain) {
+      var noiseLevel = PINK_NOISE_BASE_GAIN + dev * PINK_NOISE_SCALE_GAIN;
+      noiseGain.gain.setTargetAtTime(noiseLevel, audioCtx.currentTime, 0.05);
+    }
   }
 
-  function setGain(gainNode, value) {
-    // setTargetAtTime 是 iOS 上最顺滑且不会崩溃的音量控制方式
-    gainNode.gain.setTargetAtTime(value, audioCtx.currentTime, 0.05);
+  // 兼容旧调用点：onOrientation 仍调用 updateVolumes
+  function updateVolumes() {
+    updatePlayerUI();
   }
 
   // --- 传感器逻辑 ---
@@ -368,17 +414,15 @@
     if (!audioCtx || targetHeading == null) return;
     gameStarted = true;
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    for (var key in tracks) { tracks[key].el.play(); }
-    updateVolumes();
+    // 启动合成“水滴脉冲”+粉红底噪
+    if (noiseGain) noiseGain.gain.setTargetAtTime(PINK_NOISE_BASE_GAIN, audioCtx.currentTime, 0.05);
+    updatePlayerUI();
+    startPulseLoop();
   }
 
   function doEndGame() {
     gameStarted = false;
-    for (var key in tracks) {
-      tracks[key].el.pause();
-      tracks[key].el.currentTime = 0;
-      setGain(tracks[key].gain, 0);
-    }
+    stopPulseLoop();
   }
 
   document.getElementById('btn-show-direction').addEventListener('click', function() {
