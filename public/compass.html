@@ -237,10 +237,18 @@
     var dev = Math.min(1, Math.max(0, diff / 180)); // 0..1
     pulseIntervalSec = PULSE_MIN_INTERVAL_SEC + dev * (PULSE_MAX_INTERVAL_SEC - PULSE_MIN_INTERVAL_SEC);
 
-    // Pink noise：底噪极微弱，随偏离略增大
+    // Pink noise：
+    // - 在 <=5° 区间：彻底关闭，让反馈极致清晰
+    // - 在 >5° 区间：偏离越大，底噪越“模糊”，增强差异感
     if (noiseGain) {
-      var noiseLevel = PINK_NOISE_BASE_GAIN + dev * PINK_NOISE_SCALE_GAIN;
-      noiseGain.gain.setTargetAtTime(noiseLevel, audioCtx.currentTime, 0.05);
+      if (diff <= 5) {
+        noiseGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+      } else {
+        // diff: 5..180 -> 0..1（只用于噪音增幅）
+        var devNoise = Math.min(1, Math.max(0, (diff - 5) / 175));
+        var noiseLevel = (PINK_NOISE_BASE_GAIN + dev * PINK_NOISE_SCALE_GAIN) * (1 + devNoise * 2);
+        noiseGain.gain.setTargetAtTime(noiseLevel, audioCtx.currentTime, 0.05);
+      }
     }
   }
 
