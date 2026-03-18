@@ -83,13 +83,18 @@
     </div>
     <div class="page-player-center">
       <p id="player-diff" class="player-diff-only" style="display:none;">— ° off</p>
-      <p class="long-press-hint">Long Press Anywhere for 2secs to Start or End.</p>
+      <p class="long-press-hint">Lift Phone to Start. Put Down to Stop.</p>
     </div>
     <div class="btn-row">
       <button id="btn-show-direction" class="btn btn-secondary">Show Direction</button>
       <button id="btn-restart" class="btn btn-secondary">Restart</button>
     </div>
   </section>
+
+  <div id="debug-panel" style="display:none; position: fixed; left: 12px; right: 12px; bottom: 12px; max-height: 40vh; overflow: auto; z-index: 9999; background: rgba(255,255,255,0.92); border: 1px solid #ddd; border-radius: 10px; padding: 10px; font-size: 12px; line-height: 1.35; color: #111;">
+    <div style="font-weight:700; margin-bottom:6px;">Debug</div>
+    <pre id="debug-text" style="margin:0; white-space:pre-wrap; word-break:break-word;"></pre>
+  </div>
 
 <script>
 (function () {
@@ -106,9 +111,17 @@
   var EMA_ALPHA = 0.15;
   var gameStarted = false;
   var directionVisible = false;
-  var longPressTimer = null;
-  var LONG_PRESS_MS = 2000;
-  var VIBRATE_MS = 1000;
+  var tiltListening = false; // 仅在已锁定方向并进入 Page 2 后启用 beta 倾斜监听
+  var HAPTIC_WAKE_MS = 120;   // 竖起：短震一次
+  var HAPTIC_SLEEP_PATTERN = [120, 90, 120]; // 放下：两下震动
+  var debugMode = /[?&]debug=1/.test(location.search);
+  var debug = {
+    enabled: debugMode,
+    permission: 'unknown',
+    listenersAttached: false,
+    events: { deviceorientation: 0, deviceorientationabsolute: 0 },
+    last: { type: '', alpha: null, beta: null, gamma: null, webkitCompassHeading: null, absolute: null, ts: 0 }
+  };
 
   // Web Audio 变量
   var audioCtx = null;
@@ -134,6 +147,29 @@
         gainNode.connect(audioCtx.destination);
         
         tracks[key] = { el: audio, gain: gainNode };
+    }
+  }
+
+  // 用于 iOS/安卓的“先解锁音频，再允许后续手势外 play()”
+  function unlockAudioForBeta() {
+    if (!audioCtx) return;
+    // 解锁 AudioContext（部分机型需要 resume）
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    // 预加载并 play 一段“静音音频”（data URI silence）
+    try {
+      var silent = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=');
+      silent.preload = 'auto';
+      silent.volume = 0;
+      silent.play().catch(function() {});
+    } catch (e) {}
+
+    // 同时尝试预先 play 音轨（但由于 gain 初始为 0，不会有声音）
+    for (var key in tracks) {
+      try {
+        tracks[key].el.currentTime = 0;
+        tracks[key].el.play().catch(function() {});
+      } catch (e2) {}
     }
   }
 
@@ -174,11 +210,83 @@
     return d > 180 ? d - 360 : d;
   }
 
+  function setDebugText() {
+    if (!debug.enabled) return;
+    var el = document.getElementById('debug-text');
+    if (!el) return;
+    var lines = [];
+    lines.push('url: ' + location.href);
+    lines.push('secureContext: ' + (window.isSecureContext ? 'true' : 'false'));
+    lines.push('protocol: ' + location.protocol);
+    lines.push('permission: ' + debug.permission);
+    lines.push('listenersAttached: ' + (debug.listenersAttached ? 'true' : 'false'));
+    lines.push('events: deviceorientation=' + debug.events.deviceorientation + ', deviceorientationabsolute=' + debug.events.deviceorientationabsolute);
+    lines.push('last.type: ' + debug.last.type);
+    lines.push('last.absolute: ' + debug.last.absolute);
+    lines.push('last.webkitCompassHeading: ' + debug.last.webkitCompassHeading);
+    lines.push('last.alpha: ' + debug.last.alpha);
+    lines.push('last.beta: ' + debug.last.beta);
+    lines.push('last.gamma: ' + debug.last.gamma);
+    lines.push('last.ts: ' + (debug.last.ts ? new Date(debug.last.ts).toISOString() : ''));
+    el.textContent = lines.join('\n');
+  }
+
   function onOrientation(ev) {
-    var raw = ev.webkitCompassHeading || (360 - (ev.alpha || 0));
-    if (filteredHeading === null) filteredHeading = raw;
+    if (debug.enabled) {
+      debug.last.type = ev && ev.type ? ev.type : '';
+      if (debug.last.type === 'deviceorientation') debug.events.deviceorientation += 1;
+      if (debug.last.type === 'deviceorientationabsolute') debug.events.deviceorientationabsolute += 1;
+      debug.last.alpha = (ev && ev.alpha != null) ? ev.alpha : null;
+      debug.last.beta = (ev && ev.beta != null) ? ev.beta : null;
+      debug.last.gamma = (ev && ev.gamma != null) ? ev.gamma : null;
+      debug.last.webkitCompassHeading = (ev && ev.webkitCompassHeading != null) ? ev.webkitCompassHeading : null;
+      debug.last.absolute = (ev && ev.absolute != null) ? ev.absolute : null;
+      debug.last.ts = Date.now();
+      setDebugText();
+    }
+
+    // beta: 倾斜角（Lift-to-Wake 触发器）
+    // Active: Math.abs(beta) 在 75° 到 105°之间
+    // Standby: beta < 30° 停止游戏（不 restart）
+    if (tiltListening && document.getElementById('page-player').classList.contains('active')) {
+      var beta = ev && ev.beta != null ? Number(ev.beta) : NaN;
+      if (!isNaN(beta)) {
+        var upright = Math.abs(beta) >= 75 && Math.abs(beta) <= 105;
+        if (upright && !gameStarted) {
+          if (navigator.vibrate) navigator.vibrate(HAPTIC_WAKE_MS);
+          doStartGame();
+        } else if (!upright && beta < 30 && gameStarted) {
+          if (navigator.vibrate) navigator.vibrate(HAPTIC_SLEEP_PATTERN);
+          doEndGame();
+        } else if (upright && gameStarted) {
+          // 已在播放则什么也不做
+        }
+      }
+    }
+
+    // 计算“方位角”：优先 webkitCompassHeading，其次用 alpha 做近似（带屏幕旋转补偿）
+    // iOS 上 alpha/beta 可能是 null/string，所以这里做容错：取不到就按 0 计算，避免 UI 永远停在 “— °”
+    var rawHeading = null;
+    if (typeof ev.webkitCompassHeading === 'number' && !isNaN(ev.webkitCompassHeading)) {
+      rawHeading = ev.webkitCompassHeading;
+    } else {
+      var alphaVal = (typeof ev.alpha === 'number' ? ev.alpha : Number(ev.alpha));
+      if (isNaN(alphaVal)) alphaVal = 0;
+
+      var screenAngle = 0;
+      try {
+        if (screen && screen.orientation && typeof screen.orientation.angle === 'number') {
+          screenAngle = screen.orientation.angle;
+        } else if (typeof window.orientation === 'number') {
+          screenAngle = window.orientation;
+        }
+      } catch (e) {}
+      rawHeading = (360 - alphaVal + screenAngle + 360) % 360;
+    }
+
+    if (filteredHeading === null) filteredHeading = rawHeading;
     else {
-      var d = shortestAngleDiff(filteredHeading, raw);
+      var d = shortestAngleDiff(filteredHeading, rawHeading);
       filteredHeading = (filteredHeading + d * EMA_ALPHA + 360) % 360;
     }
 
@@ -190,20 +298,59 @@
 
   // --- 按钮事件 ---
   document.getElementById('btn-enable-sensors').addEventListener('click', function() {
+    var enableBtn = this;
     initAudioContext(); // 用户点击瞬间解锁 Web Audio
+    unlockAudioForBeta(); // 预加载并 play 静音音频，保证后续 beta 触发能正常出声
+
+    if (debug.enabled) {
+      document.getElementById('debug-panel').style.display = 'block';
+      setDebugText();
+    }
+
+    function onSensorsReady() {
+      enableBtn.style.display = 'none';
+      document.getElementById('btn-lock').style.display = 'inline-flex';
+      document.getElementById('btn-next').style.display = 'inline-flex';
+      document.getElementById('setup-status').textContent = 'Sensors active. Rotate and lock. Then lift to start.';
+    }
+
+    // iOS 要求安全上下文(HTTPS) 才会弹出 motion/orientation 授权框
+    if (!window.isSecureContext) {
+      debug.permission = 'blocked_in_insecure_context';
+      if (debug.enabled) setDebugText();
+      document.getElementById('setup-status').textContent =
+        'Motion & Orientation requires HTTPS on iOS (secureContext=false). Please test on https://www.yujingshistudio.com/compass or use an HTTPS dev tunnel.';
+      return;
+    }
     
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
       DeviceOrientationEvent.requestPermission().then(function(res) {
-        if (res === 'granted') window.addEventListener('deviceorientation', onOrientation);
+        debug.permission = res;
+        if (debug.enabled) setDebugText();
+        if (res === 'granted') {
+          window.addEventListener('deviceorientation', onOrientation);
+          window.addEventListener('deviceorientationabsolute', onOrientation);
+          debug.listenersAttached = true;
+          if (debug.enabled) setDebugText();
+          onSensorsReady();
+        } else {
+          document.getElementById('setup-status').textContent =
+            'Permission not granted. secureContext=' + (window.isSecureContext ? 'true' : 'false') +
+            '. On iOS Safari you must allow Motion & Orientation for this site (and ensure you are using Safari, not an in-app browser).';
+        }
+      }).catch(function(err) {
+        debug.permission = 'error: ' + (err && err.message ? err.message : String(err));
+        if (debug.enabled) setDebugText();
+        document.getElementById('setup-status').textContent = 'Permission request failed.';
       });
     } else {
       window.addEventListener('deviceorientation', onOrientation);
+      window.addEventListener('deviceorientationabsolute', onOrientation);
+      debug.permission = 'not_required';
+      debug.listenersAttached = true;
+      if (debug.enabled) setDebugText();
+      onSensorsReady();
     }
-    
-    this.style.display = 'none';
-    document.getElementById('btn-lock').style.display = 'inline-flex';
-    document.getElementById('btn-next').style.display = 'inline-flex';
-    document.getElementById('setup-status').textContent = 'Sensors active. Rotate and lock.';
   });
 
   document.getElementById('btn-lock').addEventListener('click', function() {
@@ -214,6 +361,7 @@
   document.getElementById('btn-next').addEventListener('click', function() {
     document.getElementById('page-setup').classList.remove('active');
     document.getElementById('page-player').classList.add('active');
+    tiltListening = targetHeading != null; // 仅在已锁定方向后启用倾斜监听
   });
 
   function doStartGame() {
@@ -232,32 +380,6 @@
       setGain(tracks[key].gain, 0);
     }
   }
-
-  function onLongPress() {
-    longPressTimer = null;
-    if (navigator.vibrate) navigator.vibrate(VIBRATE_MS);
-    if (gameStarted) doEndGame(); else doStartGame();
-  }
-
-  function clearLongPressTimer() {
-    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-  }
-
-  var playerEl = document.getElementById('page-player');
-  function startLongPressTimer(ev) {
-    if (!playerEl.classList.contains('active')) return;
-    if (ev.target.closest('button') || ev.target.closest('input')) return;
-    ev.preventDefault();
-    clearLongPressTimer();
-    longPressTimer = setTimeout(onLongPress, LONG_PRESS_MS);
-  }
-  playerEl.addEventListener('touchstart', startLongPressTimer, { passive: false });
-  playerEl.addEventListener('mousedown', startLongPressTimer);
-  playerEl.addEventListener('touchend', clearLongPressTimer);
-  playerEl.addEventListener('mouseup', clearLongPressTimer);
-  playerEl.addEventListener('mouseleave', clearLongPressTimer);
-  playerEl.addEventListener('touchcancel', clearLongPressTimer);
-  playerEl.addEventListener('contextmenu', function(ev) { ev.preventDefault(); });
 
   document.getElementById('btn-show-direction').addEventListener('click', function() {
     directionVisible = !directionVisible;
