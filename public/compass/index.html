@@ -116,10 +116,10 @@
     events: { deviceorientation: 0, deviceorientationabsolute: 0 },
     last: { type: '', alpha: null, beta: null, gamma: null, webkitCompassHeading: null, absolute: null, ts: 0 }
   };
-  // Web Audio 变量（合成音效：440Hz 脉冲水滴 + 极微弱粉红噪音）
+  // Web Audio 变量（合成音效：440Hz 脉冲水滴 + square 底噪）
   var audioCtx = null;
-  var noiseSource = null;
-  var noiseGain = null;
+  var squareOsc = null;
+  var squareGain = null;
 
   var SINE_FREQ = 440;
   var PULSE_DECAY_SEC = 0.1;
@@ -130,56 +130,34 @@
   var PULSE_MAX_INTERVAL_SEC = 1.0;  // 偏离目标：滴......滴......
   var pulseIntervalSec = PULSE_MAX_INTERVAL_SEC;
 
-  var PINK_NOISE_BASE_GAIN = 0.00002;
-  var PINK_NOISE_SCALE_GAIN = 0.00012; // 随 diff 略增大（仍保持极弱）
-
   var pulseTimer = null;
 
-  function createPinkNoiseBuffer(ctx, durationSec) {
-    var bufferSize = Math.max(1, Math.floor(ctx.sampleRate * durationSec));
-    var buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    var output = buffer.getChannelData(0);
-
-    var b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-    for (var i = 0; i < bufferSize; i++) {
-      var white = Math.random() * 2 - 1;
-      b0 = 0.99886 * b0 + white * 0.0555179;
-      b1 = 0.99332 * b1 + white * 0.0750759;
-      b2 = 0.96900 * b2 + white * 0.1538520;
-      b3 = 0.86650 * b3 + white * 0.3104856;
-      b4 = 0.55000 * b4 + white * 0.5329522;
-      b5 = -0.7616 * b5 - white * 0.0168980;
-
-      var pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
-      b6 = white * 0.115926;
-      output[i] = pink * 0.11;
-    }
-    return buffer;
-  }
+  // Square 底噪：频率随偏离 diff 增大而升高
+  // 映射：180° -> 50Hz, 5° -> 10Hz
+  var SQUARE_FREQ_AT_5 = 10;
+  var SQUARE_FREQ_AT_180 = 50;
+  var SQUARE_GAIN_MAX = 0.0025; // 仅作底噪，避免压过脉冲水滴
 
   function initAudioContext() {
     if (audioCtx) return;
     var AudioContext = window.AudioContext || window.webkitAudioContext;
     audioCtx = new AudioContext();
 
-    noiseGain = audioCtx.createGain();
-    noiseGain.gain.value = 0;
-    noiseGain.connect(audioCtx.destination);
+    squareGain = audioCtx.createGain();
+    squareGain.gain.value = 0; // 默认关闭：靠 diff >= 5 时开启
+    squareGain.connect(audioCtx.destination);
 
-    noiseSource = audioCtx.createBufferSource();
-    noiseSource.buffer = createPinkNoiseBuffer(audioCtx, 2.0);
-    noiseSource.loop = true;
-    noiseSource.connect(noiseGain);
-    try { noiseSource.start(); } catch (e) {}
+    squareOsc = audioCtx.createOscillator();
+    squareOsc.type = 'square';
+    squareOsc.frequency.setValueAtTime(SQUARE_FREQ_AT_5, audioCtx.currentTime);
+    squareOsc.connect(squareGain);
+    try { squareOsc.start(); } catch (e) {}
   }
 
   // 页面点击后的“解锁”入口：resume + 轻微打开底噪（避免后续手势外无法响）
   function unlockAudioForBeta() {
     if (!audioCtx) return;
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    if (noiseGain) {
-      noiseGain.gain.setTargetAtTime(PINK_NOISE_BASE_GAIN, audioCtx.currentTime, 0.05);
-    }
   }
 
   function playPulse(time) {
@@ -219,7 +197,7 @@
       clearTimeout(pulseTimer);
       pulseTimer = null;
     }
-    if (noiseGain) noiseGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+    if (squareGain) squareGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
   }
 
   function updatePlayerUI() {
@@ -238,17 +216,16 @@
     var dev = Math.min(1, Math.max(0, diff / 180)); // 0..1
     pulseIntervalSec = PULSE_MIN_INTERVAL_SEC + dev * (PULSE_MAX_INTERVAL_SEC - PULSE_MIN_INTERVAL_SEC);
 
-    // Pink noise：
-    // - 在 <=5° 区间：彻底关闭，让反馈极致清晰
-    // - 在 >5° 区间：偏离越大，底噪越“模糊”，增强差异感
-    if (noiseGain) {
+    // Square 底噪：diff 越大 -> 频率越高（并让 diff<=5 时关闭实现更清晰反馈）
+    if (squareOsc && squareGain) {
       if (diff <= 5) {
-        noiseGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+        squareGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
       } else {
-        // diff: 5..180 -> 0..1（只用于噪音增幅）
-        var devNoise = Math.min(1, Math.max(0, (diff - 5) / 175));
-        var noiseLevel = (PINK_NOISE_BASE_GAIN + dev * PINK_NOISE_SCALE_GAIN) * (1 + devNoise * 2);
-        noiseGain.gain.setTargetAtTime(noiseLevel, audioCtx.currentTime, 0.05);
+        var devNoise = Math.min(1, Math.max(0, (diff - 5) / 175)); // 0..1
+        var freq = SQUARE_FREQ_AT_5 + devNoise * (SQUARE_FREQ_AT_180 - SQUARE_FREQ_AT_5);
+        var gain = SQUARE_GAIN_MAX * devNoise;
+        squareOsc.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.05);
+        squareGain.gain.setTargetAtTime(gain, audioCtx.currentTime, 0.05);
       }
     }
   }
@@ -422,8 +399,6 @@
     if (!audioCtx || targetHeading == null) return;
     gameStarted = true;
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    // 启动合成“水滴脉冲”+粉红底噪
-    if (noiseGain) noiseGain.gain.setTargetAtTime(PINK_NOISE_BASE_GAIN, audioCtx.currentTime, 0.05);
     updatePlayerUI();
     startPulseLoop();
   }
