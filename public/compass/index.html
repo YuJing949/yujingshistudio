@@ -282,7 +282,7 @@
     if (tiltListening && document.getElementById('page-player').classList.contains('active')) {
       var beta = ev && ev.beta != null ? Number(ev.beta) : NaN;
       if (!isNaN(beta)) {
-        var upright = Math.abs(beta) >= 75 && Math.abs(beta) <= 105;
+        var upright = Math.abs(beta) >= 55 && Math.abs(beta) <= 105;
         if (upright && !gameStarted) {
           if (navigator.vibrate) navigator.vibrate(HAPTIC_WAKE_MS);
           doStartGame();
