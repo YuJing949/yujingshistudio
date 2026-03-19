@@ -136,7 +136,7 @@
   // 映射：180° -> 50Hz, 5° -> 10Hz
   var SQUARE_FREQ_AT_5 = 10;
   var SQUARE_FREQ_AT_180 = 50;
-  var SQUARE_GAIN_MAX = 0.0025; // 仅作底噪，避免压过脉冲水滴
+  var SQUARE_GAIN_MAX = 0.005; // 仅作底噪，避免压过脉冲水滴
 
   function initAudioContext() {
     if (audioCtx) return;
