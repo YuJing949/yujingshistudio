@@ -1,50 +1,30 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { Header } from "./Header";
 import { ImageWithLoading, VideoWithLoading } from "./MediaWithLoading";
+import { useLanguage } from "../contexts/LanguageContext";
 
-const projects = [
-  {
-    id: 1,
-    title: "Grow-Together",
-    description: "A Modular Herb Pot Reducing Waste and Encouraging Community Sharing.",
+const projectThumbnails: Record<number, { thumbnail: string; video?: string }> = {
+  1: {
     thumbnail: "https://media.yujingshistudio.com/plant_stick.mp4",
     video: "https://media.yujingshistudio.com/plant_stick.mp4",
   },
-  {
-    id: 2,
-    title: "Co-design with Stockwell Community",
-    description: "Co-designed Furniture with Stockwell Community.",
+  2: {
+    thumbnail: "https://media.yujingshistudio.com/tala_home.mp4",
+    video: "https://media.yujingshistudio.com/tala_home.mp4",
+  },
+  3: {
     thumbnail: "https://media.yujingshistudio.com/stockwell_render2.jpg",
   },
-  {
-    id: 3,
-    title: "Orbital Time",
-    description: "A timer that empowers users to redefine time in their own way.",
+  4: {
     thumbnail: "https://media.yujingshistudio.com/time_rotate.mp4",
   },
-  // {
-  //   id: 4,
-  //   title: "A Traveller's Living-room",
-  //   description: "Exploring the boundary between home and public space",
-  //   thumbnail: "https://images.unsplash.com/photo-1560461396-ec0ef7bb29dd?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtaW5pbWFsJTIwcHJvZHVjdCUyMGRlc2lnbnxlbnwxfHx8fDE3NzM0ODQxMDh8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-  // },
-  // {
-  //   id: 5,
-  //   title: "Creative Space",
-  //   description: "Workspace environment design",
-  //   thumbnail: "https://images.unsplash.com/photo-1519217651866-847339e674d4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjcmVhdGl2ZSUyMHdvcmtzcGFjZXxlbnwxfHx8fDE3NzM0MTAwMjJ8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-  // },
-  // {
-  //   id: 6,
-  //   title: "Art Installation",
-  //   description: "Contemporary spatial art",
-  //   thumbnail: "https://images.unsplash.com/photo-1723242017405-5018aa65ddad?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjb250ZW1wb3JhcnklMjBhcnQlMjBpbnN0YWxsYXRpb258ZW58MXx8fHwxNzczMzkyMjgyfDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-  // },
-];
+};
 
 export function Home() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { t } = useLanguage();
   const introRef = useRef<HTMLDivElement>(null);
   const projectsRef = useRef<HTMLDivElement>(null);
   const contactRef = useRef<HTMLDivElement>(null);
@@ -54,6 +34,13 @@ export function Home() {
   const [showCursor, setShowCursor] = useState(false);
   const [isLeftColumnHovered, setIsLeftColumnHovered] = useState(false);
   const [isRightColumnHovered, setIsRightColumnHovered] = useState(false);
+
+  const projects = [1, 2, 3, 4].map((id) => ({
+    id,
+    title: t(`project.${id}.title`),
+    subtitle: t(`project.${id}.subtitle`),
+    ...projectThumbnails[id],
+  }));
 
   const scrollToTop = () => {
     rightColumnRef.current?.scrollTo({ top: 0, behavior: "smooth" });
@@ -87,6 +74,17 @@ export function Home() {
     setCursorPosition({ x: e.clientX, y: e.clientY });
   };
 
+  // 从项目页返回时 ?section=projects|contact 滚动到对应区块
+  useEffect(() => {
+    const section = searchParams.get("section");
+    if (section !== "projects" && section !== "contact") return;
+    const timer = window.setTimeout(() => {
+      if (section === "projects") projectsRef.current?.scrollIntoView({ behavior: "smooth" });
+      else contactRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [searchParams]);
+
   // 左栏滚轮时滚动右栏（仅桌面端），与右栏原生滚动手感一致
   useEffect(() => {
     const el = leftColumnRef.current;
@@ -95,14 +93,13 @@ export function Home() {
       if (window.innerWidth < 1024 || !rightColumnRef.current) return;
       e.preventDefault();
       const container = rightColumnRef.current;
-      // 按 deltaMode 转成像素，与浏览器原生滚动一致
       let delta = 0;
       if (e.deltaMode === 0) {
-        delta = e.deltaY; // 已是像素
+        delta = e.deltaY;
       } else if (e.deltaMode === 1) {
-        delta = e.deltaY * 40; // 行 → 约 40px/行
+        delta = e.deltaY * 40;
       } else {
-        delta = e.deltaY * container.clientHeight; // 页
+        delta = e.deltaY * container.clientHeight;
       }
       container.scrollTop += delta;
     };
@@ -118,37 +115,33 @@ export function Home() {
         onContactClick={scrollToContact}
       />
 
-      {/* Custom Cursor for project images - Hidden on mobile */}
       {showCursor && (
         <div
           className="fixed pointer-events-none z-50 text-white text-xl tracking-wider hidden lg:block"
           style={{
             left: `${cursorPosition.x}px`,
             top: `${cursorPosition.y}px`,
-            transform: 'translate(-50%, -50%)',
+            transform: "translate(-50%, -50%)",
           }}
         >
           enter
         </div>
       )}
 
-      {/* Scroll Cursor when over left or right column - Hidden on mobile */}
       {(isLeftColumnHovered || isRightColumnHovered) && !showCursor && (
         <div
           className="fixed pointer-events-none z-50 text-gray-400 text-xl tracking-wider hidden lg:block"
           style={{
             left: `${cursorPosition.x}px`,
             top: `${cursorPosition.y}px`,
-            transform: 'translate(-50%, -50%)',
+            transform: "translate(-50%, -50%)",
           }}
         >
           scroll
         </div>
       )}
 
-      {/* Main Layout - Single column on mobile, Two Columns on desktop */}
       <div className="flex flex-col lg:flex-row lg:h-screen">
-        {/* Left Column - Fixed on desktop, compact on mobile */}
         <div
           ref={leftColumnRef}
           className="w-full lg:w-1/2 flex items-start px-3 pt-20 pb-8 lg:pb-0 lg:fixed lg:h-screen"
@@ -156,12 +149,12 @@ export function Home() {
           onMouseEnter={handleLeftColumnMouseEnter}
           onMouseLeave={handleLeftColumnMouseLeave}
         >
-          <h1 className="font-bold leading-none tracking-tight text-[clamp(2.5rem,10vw,12.5rem)]">
-            Hi, I'm<br />Yujing Shi,
+          <h1 className="font-bold leading-none tracking-tight text-[clamp(2.5rem,10vw,12.5rem)] [word-break:keep-all]">
+            {t("intro.greeting.line1")},<br />
+            <span className="whitespace-nowrap">{t("intro.greeting.line2")},</span>
           </h1>
         </div>
 
-        {/* Right Column - Scrollable */}
         <div
           ref={rightColumnRef}
           className="w-full lg:w-1/2 lg:ml-[50%] lg:overflow-y-auto"
@@ -170,24 +163,17 @@ export function Home() {
           onMouseEnter={handleRightColumnMouseEnter}
           onMouseLeave={handleRightColumnMouseLeave}
         >
-          {/* Intro Section */}
           <div ref={introRef} className="lg:min-h-screen flex items-start lg:items-end px-3 pb-8">
-            <p className="text-lg lg:text-2xl leading-relaxed font-light">
-              I'm a product and experience designer exploring embodied and inclusive interaction. 
-              Based in London, working at the intersection 
-              of object-making, computing, and spatial curation.
-              Currently studying Product & Furniture Design at UAL, 
-              with a Creative Computing diploma from CCI.
-            </p>
+            <p className="text-lg lg:text-2xl leading-relaxed font-light">{t("intro.description")}</p>
           </div>
 
-          {/* Projects Section */}
           <div ref={projectsRef} data-section="projects" className="min-h-screen py-8 px-3">
-            <h2 className="tracking-tight mb-8 text-[28px] lg:text-[36px] italic font-bold">PROJECTS</h2>
+            <h2 className="tracking-tight mb-8 text-[28px] lg:text-[36px] italic font-bold">{t("projects.title")}</h2>
             <div className="space-y-6">
-              {projects.map((project, index) => (
+              {projects.map((project) => (
                 <button
                   key={project.id}
+                  type="button"
                   onClick={() => navigate(`/project/${project.id}`)}
                   onMouseMove={handleMouseMove}
                   onMouseEnter={handleMouseEnter}
@@ -195,7 +181,7 @@ export function Home() {
                   className="block w-full group lg:cursor-none"
                 >
                   <div className="aspect-[4/3] overflow-hidden relative">
-                    {project.thumbnail.endsWith('.mp4') ? (
+                    {project.thumbnail.endsWith(".mp4") ? (
                       <VideoWithLoading
                         src={project.thumbnail}
                         loop
@@ -213,23 +199,19 @@ export function Home() {
                       />
                     )}
                   </div>
-                  <p className="mt-2 text-sm tracking-wider text-left">
-                    {project.description}
-                  </p>
+                  <p className="mt-2 text-sm tracking-wider text-left">{project.subtitle}</p>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Contact Section */}
           <div ref={contactRef} data-section="contact" className="min-h-screen py-8 px-3">
             <div className="flex flex-col lg:flex-row gap-8">
-              {/* Contact Info */}
               <div className="flex-1">
-                <h2 className="text-[28px] lg:text-[36px] tracking-tight mb-8 font-bold">CONTACT</h2>
+                <h2 className="text-[28px] lg:text-[36px] tracking-tight mb-8 font-bold">{t("contact.title")}</h2>
                 <div className="space-y-4">
                   <div>
-                    <p className="text-lg lg:text-xl text-gray-500 mb-2">Instagram</p>
+                    <p className="text-lg lg:text-xl text-gray-500 mb-2">{t("contact.instagram")}</p>
                     <a
                       href="https://instagram.com/yujing.context"
                       target="_blank"
@@ -240,7 +222,7 @@ export function Home() {
                     </a>
                   </div>
                   <div>
-                    <p className="text-lg lg:text-xl text-gray-500 mb-2">Behance</p>
+                    <p className="text-lg lg:text-xl text-gray-500 mb-2">{t("contact.behance")}</p>
                     <a
                       href="https://behance.net/yujingshi4"
                       target="_blank"
@@ -251,7 +233,7 @@ export function Home() {
                     </a>
                   </div>
                   <div>
-                    <p className="text-lg lg:text-xl text-gray-500 mb-2">LinkedIn</p>
+                    <p className="text-lg lg:text-xl text-gray-500 mb-2">{t("contact.linkedin")}</p>
                     <a
                       href="https://linkedin.com/in/yujingshi6"
                       target="_blank"
@@ -262,7 +244,7 @@ export function Home() {
                     </a>
                   </div>
                   <div>
-                    <p className="text-lg lg:text-xl text-gray-500 mb-2">Email</p>
+                    <p className="text-lg lg:text-xl text-gray-500 mb-2">{t("contact.email")}</p>
                     <a
                       href="mailto:shi.yujing@outlook.com"
                       className="block text-lg lg:text-xl hover:opacity-60 transition-opacity"
@@ -273,7 +255,6 @@ export function Home() {
                 </div>
               </div>
 
-              {/* Photo */}
               <div className="flex-1">
                 <div className="aspect-[3/4] overflow-hidden relative">
                   <ImageWithLoading
