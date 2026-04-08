@@ -40,7 +40,7 @@ const projectsMedia: Record<string, ProjectData> = {
   "4": {
     images: [
       "https://media.yujingshistudio.com/time_box.mp4",
-      "https://media.yujingshistudio.com/time_detail.JPG",
+      "https://media.yujingshistudio.com/time_detail.jpg",
       "https://media.yujingshistudio.com/time_model.png",
       "https://media.yujingshistudio.com/time_rotate.mp4",
     ],
