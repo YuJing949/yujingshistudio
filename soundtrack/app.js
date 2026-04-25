@@ -71,11 +71,13 @@ const routeCtx = routeCanvas.getContext("2d");
 
 // Session state
 let isRecording = false;
+let isCalibrating = false;
 let mediaStream = null;
 let mediaRecorder = null;
 let lastChunkStartMs = 0;
 let recordingLoopPromise = null;
 let activeChunkStopTimer = null;
+let recordingSessionToken = 0;
 
 // Listen Mode state
 let listenModeEnabled = false;
@@ -111,6 +113,10 @@ let yMeters = 0;
 let lastStepMs = 0;
 let smoothedMag = 0;
 let lastMagDelta = 0;
+
+// Debug log throttles (to avoid console spam affecting performance).
+let lastMotionLogMs = 0;
+let lastOrientationLogMs = 0;
 
 // Event handler references (so we can remove them cleanly)
 let onMotion = null;
@@ -163,7 +169,13 @@ function updateMetricsUI() {
   stepsCount.textContent = String(stepCount);
   posX.textContent = `x=${xMeters.toFixed(2)}`;
   posY.textContent = `y=${yMeters.toFixed(2)}`;
-  headingVal.textContent = Number.isFinite(headingDeg) ? `${headingDeg.toFixed(0)}°` : "—";
+  if (Number.isFinite(headingDeg)) {
+    headingVal.textContent = `${headingDeg.toFixed(0)}°`;
+  } else if (isRecording) {
+    headingVal.textContent = "Waiting for heading…";
+  } else {
+    headingVal.textContent = "—";
+  }
 }
 
 function radians(deg) {
@@ -177,6 +189,7 @@ function normalizeHeading(deg) {
 }
 
 function updatePositionForStep() {
+  // Only update position if we have a valid heading.
   if (!Number.isFinite(headingDeg)) return;
   const h = radians(headingDeg);
   // Spec requirement:
@@ -494,6 +507,10 @@ function stopListeningPlayback(reason) {
   playbackText.textContent = "No nearby sound";
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function unlockAudioPlayback() {
   // Attempt to "unlock" audio on iOS Safari by playing a short silent sound
   // as a direct result of a user interaction (Enable Listen Mode tap).
@@ -732,12 +749,27 @@ async function requestOrientationPermissionIfNeeded() {
 }
 
 function startSensorTracking() {
+  // Defensive: ensure we never accumulate duplicated listeners across sessions.
+  if (onMotion || onOrientation) {
+    console.log("[sensors] Removing existing listeners before adding new ones");
+    stopSensorTracking();
+  }
+
+  console.log("[sensors] Adding motion + orientation listeners");
+
   // Motion: detect steps from acceleration magnitude changes.
   onMotion = (ev) => {
     if (!isRecording) return;
 
     const a = ev.accelerationIncludingGravity || ev.acceleration;
     if (!a) return;
+
+    // Debug: motion event received (throttled).
+    const nowLog = performance.now();
+    if (nowLog - lastMotionLogMs > 800) {
+      lastMotionLogMs = nowLog;
+      console.log("[motion] event", { x: a.x, y: a.y, z: a.z, calibrating: isCalibrating });
+    }
 
     // Magnitude of acceleration vector (m/s^2).
     const mag = Math.sqrt((a.x || 0) ** 2 + (a.y || 0) ** 2 + (a.z || 0) ** 2);
@@ -750,6 +782,12 @@ function startSensorTracking() {
     const delta = mag - smoothedMag;
     const now = performance.now();
 
+    // During calibration we build a stable smoothing baseline but do NOT count steps.
+    if (isCalibrating) {
+      lastMagDelta = delta;
+      return;
+    }
+
     // Peak-ish detection: look for rising crossing above threshold.
     const risingCross = lastMagDelta <= PEAK_THRESHOLD && delta > PEAK_THRESHOLD;
     const cooledDown = now - lastStepMs > STEP_COOLDOWN_MS;
@@ -759,7 +797,13 @@ function startSensorTracking() {
       stepCount += 1;
       updatePositionForStep();
       updateMetricsUI();
-      console.log("[step]", { stepCount, headingDeg, xMeters, yMeters, delta: delta.toFixed(2) });
+      console.log("[step] detected", {
+        stepCount,
+        headingDeg: Number.isFinite(headingDeg) ? headingDeg.toFixed(0) : "NaN",
+        xMeters: xMeters.toFixed(2),
+        yMeters: yMeters.toFixed(2),
+        delta: delta.toFixed(2),
+      });
     }
 
     lastMagDelta = delta;
@@ -772,6 +816,17 @@ function startSensorTracking() {
     if (!isRecording) return;
     let h = NaN;
 
+    // Debug: orientation event received (throttled).
+    const nowLog = performance.now();
+    if (nowLog - lastOrientationLogMs > 900) {
+      lastOrientationLogMs = nowLog;
+      console.log("[orientation] event", {
+        webkitCompassHeading: typeof ev.webkitCompassHeading === "number" ? ev.webkitCompassHeading : null,
+        alpha: typeof ev.alpha === "number" ? ev.alpha : null,
+        calibrating: isCalibrating,
+      });
+    }
+
     if (typeof ev.webkitCompassHeading === "number") {
       h = ev.webkitCompassHeading;
     } else if (typeof ev.alpha === "number") {
@@ -783,6 +838,10 @@ function startSensorTracking() {
     if (Number.isFinite(h)) {
       headingDeg = normalizeHeading(h);
       updateMetricsUI();
+      // Debug: current heading (occasionally).
+      if (nowLog - lastOrientationLogMs > 1500) {
+        console.log("[orientation] headingDeg", headingDeg.toFixed(0));
+      }
     }
   };
 
@@ -791,13 +850,20 @@ function startSensorTracking() {
 }
 
 function stopSensorTracking() {
-  if (onMotion) window.removeEventListener("devicemotion", onMotion);
-  if (onOrientation) window.removeEventListener("deviceorientation", onOrientation);
+  if (onMotion) {
+    window.removeEventListener("devicemotion", onMotion);
+    console.log("[sensors] Removed devicemotion listener");
+  }
+  if (onOrientation) {
+    window.removeEventListener("deviceorientation", onOrientation);
+    console.log("[sensors] Removed deviceorientation listener");
+  }
   onMotion = null;
   onOrientation = null;
 }
 
 function resetSessionState() {
+  // Movement + step detection MUST reset fully on every new walk.
   stepCount = 0;
   headingDeg = NaN;
   xMeters = 0;
@@ -806,6 +872,10 @@ function resetSessionState() {
   lastStepMs = 0;
   smoothedMag = 0;
   lastMagDelta = 0;
+  lastMotionLogMs = 0;
+  lastOrientationLogMs = 0;
+  isCalibrating = false;
+  listenNearest = { nodeId: null, distance: Infinity };
 
   updateMetricsUI();
   renderNodesList();
@@ -840,6 +910,8 @@ async function startRecordingSession() {
   setButtonsForRecording(true);
 
   try {
+    const token = (recordingSessionToken += 1);
+
     // Reset state at the start of each session.
     resetSessionState();
     setStatus("Starting…");
@@ -864,9 +936,20 @@ async function startRecordingSession() {
 
     // 3) Start tracking sensors.
     isRecording = true;
+    isCalibrating = true;
     startSensorTracking();
 
-    // 4) Start MediaRecorder loop producing *independent* 8-second files.
+    // 4) Calibration phase (2–3 seconds) to stabilize heading + motion smoothing baseline.
+    setStatus("Calibrating sensors…");
+    console.log("[sensors] Calibrating sensors…");
+    await sleep(2500);
+    if (!isRecording || token !== recordingSessionToken) {
+      // Walk ended or a new session started while we were waiting.
+      return;
+    }
+    isCalibrating = false;
+
+    // 5) Start MediaRecorder loop producing *independent* 8-second files.
     //
     // iPhone Safari gotcha:
     // Using `mediaRecorder.start(timeslice)` can emit "fragment" blobs after the first one,
@@ -980,6 +1063,7 @@ async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, s
 
   console.log("[rec] stopping…");
   isRecording = false;
+  isCalibrating = false;
   stopSensorTracking();
 
   // Stop current chunk timer + recorder (may emit a final dataavailable).
