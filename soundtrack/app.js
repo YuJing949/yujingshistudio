@@ -14,16 +14,29 @@ const STEP_COOLDOWN_MS = 380; // avoid double-counting
 const PEAK_THRESHOLD = 1.15; // magnitude delta threshold after filtering (approx)
 const SMOOTHING_ALPHA = 0.85; // exponential smoothing for magnitude
 
-// In-memory storage (requested shape).
-// Each entry:
-// {
-//   id, timestamp, stepCount, heading, x, y, audioBlob, audioUrl, durationSeconds
-// }
-export const audioNodes = [];
+// In-memory route sessions (single-device, no backend).
+//
+// routes = [
+//   {
+//     id: string,
+//     name: string,
+//     createdAt: number,
+//     nodes: [ ...audioNodes ]
+//   }
+// ]
+//
+// During recording we keep a separate `currentRecordingRoute` until the walk ends.
+let routes = [];
+let currentRecordingRoute = null;
+let selectedRoute = null;
+let routeCounter = 0;
 
 // UI elements
 const startBtn = document.getElementById("startBtn");
 const endBtn = document.getElementById("endBtn");
+const deleteRouteBtn = document.getElementById("deleteRouteBtn");
+const routesList = document.getElementById("routesList");
+const routesEmpty = document.getElementById("routesEmpty");
 const statusText = document.getElementById("statusText");
 const permText = document.getElementById("permText");
 const errorBox = document.getElementById("errorBox");
@@ -71,6 +84,20 @@ let lastMagDelta = 0;
 let onMotion = null;
 let onOrientation = null;
 
+function makeId() {
+  if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
+  return `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function getViewingRoute() {
+  return isRecording ? currentRecordingRoute : selectedRoute;
+}
+
+function getViewingNodes() {
+  const r = getViewingRoute();
+  return r?.nodes || [];
+}
+
 function setError(message) {
   if (!message) {
     errorBox.hidden = true;
@@ -86,7 +113,7 @@ function setStatus(text) {
 }
 
 function updateMetricsUI() {
-  nodesCount.textContent = String(audioNodes.length);
+  nodesCount.textContent = String(getViewingNodes().length);
   stepsCount.textContent = String(stepCount);
   posX.textContent = `x=${xMeters.toFixed(2)}`;
   posY.textContent = `y=${yMeters.toFixed(2)}`;
@@ -153,7 +180,8 @@ function drawRoutePreview() {
   }
   routeCtx.restore();
 
-  const pts = audioNodes.map((n) => ({ x: n.x, y: n.y, id: n.id }));
+  const nodes = getViewingNodes();
+  const pts = nodes.map((n) => ({ x: n.x, y: n.y, id: n.id }));
   // Always include origin even if there are no nodes.
   pts.unshift({ x: 0, y: 0, id: 0 });
   // Include the current live position while recording so the route updates even between nodes.
@@ -230,9 +258,10 @@ function drawRoutePreview() {
 
 function renderNodesList() {
   nodesList.innerHTML = "";
-  nodesEmpty.hidden = audioNodes.length !== 0;
+  const nodes = getViewingNodes();
+  nodesEmpty.hidden = nodes.length !== 0;
 
-  for (const node of audioNodes) {
+  for (const node of nodes) {
     const li = document.createElement("li");
     li.className = "node";
 
@@ -283,6 +312,48 @@ function renderNodesList() {
 
     nodesList.appendChild(li);
   }
+}
+
+function renderRoutesPanel() {
+  routesList.innerHTML = "";
+  routesEmpty.hidden = routes.length !== 0;
+
+  for (const route of routes) {
+    const li = document.createElement("li");
+    li.className = "route" + (selectedRoute?.id === route.id ? " selected" : "");
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "route-btn";
+    btn.addEventListener("click", () => {
+      if (isRecording) return; // keep viewing in recording mode
+      selectedRoute = route;
+      console.log("[route] selected", route.name);
+      updateMetricsUI();
+      renderRoutesPanel();
+      renderNodesList();
+      drawRoutePreview();
+      updateDeleteRouteButton();
+    });
+
+    const title = document.createElement("div");
+    title.className = "route-title";
+    title.textContent = route.name;
+
+    const sub = document.createElement("div");
+    sub.className = "route-sub";
+    sub.textContent = `${route.nodes.length} nodes · ${new Date(route.createdAt).toLocaleString()}`;
+
+    btn.appendChild(title);
+    btn.appendChild(sub);
+    li.appendChild(btn);
+    routesList.appendChild(li);
+  }
+}
+
+function updateDeleteRouteButton() {
+  // Only allow deleting when not recording, and a route is selected.
+  deleteRouteBtn.disabled = isRecording || !selectedRoute;
 }
 
 async function requestMotionPermissionIfNeeded() {
@@ -373,7 +444,6 @@ function stopSensorTracking() {
 }
 
 function resetSessionState() {
-  audioNodes.splice(0, audioNodes.length);
   stepCount = 0;
   headingDeg = NaN;
   xMeters = 0;
@@ -391,6 +461,7 @@ function resetSessionState() {
 function setButtonsForRecording(recording) {
   startBtn.disabled = recording;
   endBtn.disabled = !recording;
+  updateDeleteRouteButton();
 }
 
 function formatPermStatus(parts) {
@@ -401,6 +472,12 @@ async function startRecordingSession() {
   if (isRecording) {
     console.warn("[rec] start ignored; already recording");
     return;
+  }
+
+  if (!currentRecordingRoute) {
+    // Start is routed through "Start New Walk" and should always set a route,
+    // but guard anyway to prevent mixing nodes.
+    throw new Error("No current route. Tap “Start New Walk” to create a route first.");
   }
 
   setError("");
@@ -451,7 +528,8 @@ async function startRecordingSession() {
     // options.mimeType = "audio/mp4";
     // options.mimeType = "audio/webm;codecs=opus";
 
-    let nodeId = 1;
+    // Node ids are incremental within a route.
+    let nodeId = currentRecordingRoute.nodes.length + 1;
 
     const recordOneChunk = () =>
       new Promise((resolve, reject) => {
@@ -507,8 +585,11 @@ async function startRecordingSession() {
           durationSeconds: Math.round(durationSeconds),
         };
 
-        audioNodes.push(node);
-        console.log("[node] saved", { ...node, audioBlob: `Blob(${blob.type || "unknown"}, ${blob.size} bytes)` });
+        currentRecordingRoute.nodes.push(node);
+        console.log("[route] Node added to", currentRecordingRoute.name, {
+          ...node,
+          audioBlob: `Blob(${blob.type || "unknown"}, ${blob.size} bytes)`,
+        });
 
         updateMetricsUI();
         renderNodesList();
@@ -590,25 +671,91 @@ async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, s
   if (!silent) setStatus("Recording stopped");
   permText.textContent = "Not recording.";
 
-  if (!keepNodes) {
-    // If you ever want a full reset on End, change keepNodes to false.
-    resetSessionState();
-  } else {
-    updateMetricsUI();
-    renderNodesList();
-    drawRoutePreview();
+  updateMetricsUI();
+  renderNodesList();
+  drawRoutePreview();
+}
+
+function startNewWalk() {
+  if (isRecording) return;
+
+  routeCounter += 1;
+  const route = {
+    id: makeId(),
+    name: `Route ${routeCounter}`,
+    createdAt: Date.now(),
+    nodes: [],
+  };
+
+  currentRecordingRoute = route;
+  selectedRoute = null; // recording mode shows the current route
+  console.log("[route] Route started", route.name);
+
+  renderRoutesPanel();
+  updateMetricsUI();
+  renderNodesList();
+  drawRoutePreview();
+  updateDeleteRouteButton();
+
+  startRecordingSession();
+}
+
+async function endWalk() {
+  if (!isRecording) return;
+
+  await stopRecordingSession({ keepNodes: true, silent: false });
+
+  if (currentRecordingRoute) {
+    routes.unshift(currentRecordingRoute);
+    selectedRoute = currentRecordingRoute;
+    console.log("[route] Route saved", currentRecordingRoute.name);
+    currentRecordingRoute = null;
   }
+
+  renderRoutesPanel();
+  updateMetricsUI();
+  renderNodesList();
+  drawRoutePreview();
+  updateDeleteRouteButton();
+}
+
+function deleteSelectedRoute() {
+  if (isRecording) return;
+  if (!selectedRoute) return;
+
+  // Revoke object URLs to avoid leaking memory.
+  for (const n of selectedRoute.nodes) {
+    try {
+      if (n.audioUrl) URL.revokeObjectURL(n.audioUrl);
+    } catch {
+      // ignore
+    }
+  }
+
+  routes = routes.filter((r) => r.id !== selectedRoute.id);
+  console.log("[route] deleted", selectedRoute.name);
+  selectedRoute = routes[0] || null;
+
+  renderRoutesPanel();
+  updateMetricsUI();
+  renderNodesList();
+  drawRoutePreview();
+  updateDeleteRouteButton();
 }
 
 // Buttons (must be user gesture)
 startBtn.addEventListener("click", () => {
-  console.log("[ui] Start tapped");
-  startRecordingSession();
+  console.log("[ui] Start New Walk tapped");
+  startNewWalk();
 });
 
 endBtn.addEventListener("click", () => {
-  console.log("[ui] End tapped");
-  stopRecordingSession({ keepNodes: true, silent: false });
+  console.log("[ui] End Walk tapped");
+  endWalk();
+});
+
+deleteRouteBtn.addEventListener("click", () => {
+  deleteSelectedRoute();
 });
 
 // Initial UI
@@ -616,6 +763,8 @@ setButtonsForRecording(false);
 setStatus("Not recording");
 updateMetricsUI();
 drawRoutePreview();
+renderRoutesPanel();
+updateDeleteRouteButton();
 
 console.log("[init] SoundRoute prototype loaded");
 

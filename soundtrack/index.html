@@ -16,9 +16,20 @@
         </p>
       </header>
 
+      <section class="routes" aria-label="Routes">
+        <div class="routes-top">
+          <h2>Routes</h2>
+          <button id="deleteRouteBtn" class="btn btn-ghost" type="button" disabled>
+            Delete route
+          </button>
+        </div>
+        <div id="routesEmpty" class="empty">No routes recorded yet.</div>
+        <ol id="routesList" class="routes-list"></ol>
+      </section>
+
       <section class="controls" aria-label="Recording controls">
-        <button id="startBtn" class="btn btn-primary" type="button">Start</button>
-        <button id="endBtn" class="btn btn-danger" type="button" disabled>End</button>
+        <button id="startBtn" class="btn btn-primary" type="button">Start New Walk</button>
+        <button id="endBtn" class="btn btn-danger" type="button" disabled>End Walk</button>
       </section>
 
       <section class="status" aria-label="Status">
