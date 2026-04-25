@@ -380,14 +380,22 @@ async function startRecordingSession() {
     resetSessionState();
     setStatus("Starting…");
 
-    // 1) Microphone permission (must be from user tap).
+    // IMPORTANT (iPhone Safari):
+    // Motion/Orientation permission prompts MUST be triggered directly by a user gesture.
+    // If we await something else first (like getUserMedia), iOS may treat the gesture as "lost"
+    // and throw: "requesting device motion access requires a user gesture to prompt".
+    //
+    // So we request motion/orientation FIRST, then microphone.
+
+    // 1) Motion/Orientation permissions (iOS 13+ requires requestPermission()).
+    await requestMotionPermissionIfNeeded();
+    await requestOrientationPermissionIfNeeded();
+    permText.textContent = formatPermStatus(["Motion OK", "Orientation OK"]);
+
+    // 2) Microphone permission (also must be from user tap).
     console.log("[perm] Requesting microphone permission via getUserMedia…");
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     console.log("[perm] Microphone granted.");
-
-    // 2) Motion/Orientation permissions (iOS requires requestPermission).
-    await requestMotionPermissionIfNeeded();
-    await requestOrientationPermissionIfNeeded();
     permText.textContent = formatPermStatus(["Microphone OK", "Motion OK", "Orientation OK"]);
 
     // 3) Start tracking sensors.
