@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0b0c" />
+    <title>SoundRoute (Prototype)</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="app" role="main">
+      <header class="header">
+        <h1>SoundRoute</h1>
+        <p class="subtitle">
+          Mobile prototype: records 8s audio nodes + estimated movement (no GPS).
+        </p>
+      </header>
+
+      <section class="controls" aria-label="Recording controls">
+        <button id="startBtn" class="btn btn-primary" type="button">Start</button>
+        <button id="endBtn" class="btn btn-danger" type="button" disabled>End</button>
+      </section>
+
+      <section class="status" aria-label="Status">
+        <div class="status-row">
+          <div class="status-label">Status</div>
+          <div id="statusText" class="status-value">Not recording</div>
+        </div>
+        <div class="status-row">
+          <div class="status-label">Permissions</div>
+          <div id="permText" class="status-value">
+            On iPhone Safari, permissions are requested after tapping Start.
+          </div>
+        </div>
+        <div id="errorBox" class="error" hidden></div>
+      </section>
+
+      <section class="metrics" aria-label="Live metrics">
+        <div class="metric">
+          <div class="metric-label">Nodes recorded</div>
+          <div id="nodesCount" class="metric-value">0</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Estimated steps</div>
+          <div id="stepsCount" class="metric-value">0</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Estimated position</div>
+          <div class="metric-value">
+            <span id="posX">x=0.00</span>
+            <span class="spacer"></span>
+            <span id="posY">y=0.00</span>
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Heading</div>
+          <div id="headingVal" class="metric-value">—</div>
+        </div>
+      </section>
+
+      <section class="preview" aria-label="Route preview">
+        <h2>Estimated route (not GPS)</h2>
+        <canvas id="routeCanvas" width="360" height="360"></canvas>
+        <p class="hint">
+          This path will drift over time. It’s only a relative estimate from steps + compass.
+        </p>
+      </section>
+
+      <section class="nodes" aria-label="Recorded nodes">
+        <h2>Recorded nodes</h2>
+        <div id="nodesEmpty" class="empty">No nodes yet.</div>
+        <ol id="nodesList" class="nodes-list"></ol>
+      </section>
+
+      <footer class="footer">
+        <p class="footnote">
+          Tip: keep the phone in a consistent orientation while walking for better heading.
+        </p>
+      </footer>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
