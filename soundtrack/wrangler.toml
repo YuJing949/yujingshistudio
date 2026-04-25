@@ -1,0 +1,8 @@
+name = "soundroute"
+compatibility_date = "2026-04-25"
+
+# SoundRoute prototype: serve ./soundtrack as static assets (no backend).
+[assets]
+directory = "."
+not_found_handling = "single-page-application"
+

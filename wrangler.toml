@@ -1,9 +1,9 @@
-name = "soundroute"
+name = "yujingshistudio"
 compatibility_date = "2026-04-25"
 
-# Serve the prototype as static assets (no backend).
+# Main site Worker build: serve the built portfolio from ./dist
+# (this should match your existing production setup).
 [assets]
-directory = "./soundtrack"
-# Optional, but nice if you add more routes later.
+directory = "./dist"
 not_found_handling = "single-page-application"
 
