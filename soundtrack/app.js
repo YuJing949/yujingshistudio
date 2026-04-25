@@ -45,6 +45,17 @@ let lastChunkStartMs = 0;
 let recordingLoopPromise = null;
 let activeChunkStopTimer = null;
 
+// Route redraw throttling (avoid redrawing on every motion event)
+let routeRedrawPending = false;
+function scheduleRouteRedraw() {
+  if (routeRedrawPending) return;
+  routeRedrawPending = true;
+  requestAnimationFrame(() => {
+    routeRedrawPending = false;
+    drawRoutePreview();
+  });
+}
+
 // Movement state
 let stepCount = 0;
 let headingDeg = NaN; // 0..360 (0 = North)
@@ -100,9 +111,22 @@ function updatePositionForStep() {
   // y += stepLength * cos(heading)
   xMeters += STEP_LENGTH_METERS * Math.sin(h);
   yMeters += STEP_LENGTH_METERS * Math.cos(h);
+  scheduleRouteRedraw();
 }
 
 function drawRoutePreview() {
+  if (!routeCtx) return;
+
+  // Make canvas crisp on high-DPI screens.
+  const dpr = window.devicePixelRatio || 1;
+  const cssSize = routeCanvas.getBoundingClientRect();
+  const targetW = Math.max(1, Math.round(cssSize.width * dpr));
+  const targetH = Math.max(1, Math.round(cssSize.width * dpr)); // keep it square
+  if (routeCanvas.width !== targetW || routeCanvas.height !== targetH) {
+    routeCanvas.width = targetW;
+    routeCanvas.height = targetH;
+  }
+
   // Draw origin + polyline connecting audio node positions.
   const w = routeCanvas.width;
   const h = routeCanvas.height;
@@ -132,6 +156,8 @@ function drawRoutePreview() {
   const pts = audioNodes.map((n) => ({ x: n.x, y: n.y, id: n.id }));
   // Always include origin even if there are no nodes.
   pts.unshift({ x: 0, y: 0, id: 0 });
+  // Include the current live position while recording so the route updates even between nodes.
+  if (isRecording) pts.push({ x: xMeters, y: yMeters, id: -1 });
 
   // Fit points to canvas with padding.
   let minX = Infinity,
@@ -189,9 +215,14 @@ function drawRoutePreview() {
   for (const p of pts) {
     const { cx, cy } = toCanvas(p);
     const isOrigin = p.id === 0;
-    routeCtx.fillStyle = isOrigin ? "rgba(52,199,89,0.95)" : "rgba(255,255,255,0.95)";
+    const isLive = p.id === -1;
+    routeCtx.fillStyle = isOrigin
+      ? "rgba(52,199,89,0.95)"
+      : isLive
+        ? "rgba(255,149,0,0.95)"
+        : "rgba(255,255,255,0.95)";
     routeCtx.beginPath();
-    routeCtx.arc(cx, cy, isOrigin ? 5 : 4, 0, Math.PI * 2);
+    routeCtx.arc(cx, cy, isOrigin ? 5 : isLive ? 5 : 4, 0, Math.PI * 2);
     routeCtx.fill();
   }
   routeCtx.restore();
