@@ -14,6 +14,10 @@ const STEP_COOLDOWN_MS = 380; // avoid double-counting
 const PEAK_THRESHOLD = 1.15; // magnitude delta threshold after filtering (approx)
 const SMOOTHING_ALPHA = 0.85; // exponential smoothing for magnitude
 
+// Listen Mode tuning
+const LISTEN_RADIUS_METERS = 5;
+const LISTEN_UPDATE_MS = 300;
+
 // In-memory route sessions (single-device, no backend).
 //
 // routes = [
@@ -37,6 +41,16 @@ const endBtn = document.getElementById("endBtn");
 const deleteRouteBtn = document.getElementById("deleteRouteBtn");
 const routesList = document.getElementById("routesList");
 const routesEmpty = document.getElementById("routesEmpty");
+
+// Listen Mode UI
+const listenToggleBtn = document.getElementById("listenToggleBtn");
+const listenRouteSelect = document.getElementById("listenRouteSelect");
+const listenWarn = document.getElementById("listenWarn");
+const listenToText = document.getElementById("listenToText");
+const nearestNodeText = document.getElementById("nearestNodeText");
+const distanceText = document.getElementById("distanceText");
+const playbackText = document.getElementById("playbackText");
+
 const statusText = document.getElementById("statusText");
 const permText = document.getElementById("permText");
 const errorBox = document.getElementById("errorBox");
@@ -57,6 +71,15 @@ let mediaRecorder = null;
 let lastChunkStartMs = 0;
 let recordingLoopPromise = null;
 let activeChunkStopTimer = null;
+
+// Listen Mode state
+let listenModeEnabled = false;
+let listeningSourceRouteId = "";
+let currentlyPlayingNodeId = null;
+let listenNearest = { nodeId: null, distance: Infinity };
+let lastListenUpdateMs = 0;
+const listenAudio = new Audio();
+listenAudio.preload = "none";
 
 // Route redraw throttling (avoid redrawing on every motion event)
 let routeRedrawPending = false;
@@ -96,6 +119,20 @@ function getViewingRoute() {
 function getViewingNodes() {
   const r = getViewingRoute();
   return r?.nodes || [];
+}
+
+function getRouteById(id) {
+  return routes.find((r) => r.id === id) || null;
+}
+
+function setListenWarn(message) {
+  if (!message) {
+    listenWarn.hidden = true;
+    listenWarn.textContent = "";
+    return;
+  }
+  listenWarn.hidden = false;
+  listenWarn.textContent = String(message);
 }
 
 function setError(message) {
@@ -139,6 +176,7 @@ function updatePositionForStep() {
   xMeters += STEP_LENGTH_METERS * Math.sin(h);
   yMeters += STEP_LENGTH_METERS * Math.cos(h);
   scheduleRouteRedraw();
+  updateListenModeThrottled();
 }
 
 function drawRoutePreview() {
@@ -180,19 +218,28 @@ function drawRoutePreview() {
   }
   routeCtx.restore();
 
-  const nodes = getViewingNodes();
-  const pts = nodes.map((n) => ({ x: n.x, y: n.y, id: n.id }));
+  // Primary route points (what we're viewing: recording route while recording, otherwise selectedRoute)
+  const nodesPrimary = getViewingNodes();
+  const ptsPrimary = nodesPrimary.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "primary" }));
   // Always include origin even if there are no nodes.
-  pts.unshift({ x: 0, y: 0, id: 0 });
+  ptsPrimary.unshift({ x: 0, y: 0, id: 0, kind: "origin" });
   // Include the current live position while recording so the route updates even between nodes.
-  if (isRecording) pts.push({ x: xMeters, y: yMeters, id: -1 });
+  if (isRecording) ptsPrimary.push({ x: xMeters, y: yMeters, id: -1, kind: "live" });
+
+  // Secondary route (Listen Mode source) while recording.
+  const sourceRoute = listenModeEnabled ? getRouteById(listeningSourceRouteId) : null;
+  const nodesSecondary = isRecording && sourceRoute ? sourceRoute.nodes : [];
+  const ptsSecondary = nodesSecondary.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "secondary" }));
+
+  // Combine for bounds fitting.
+  const ptsAll = ptsPrimary.concat(ptsSecondary);
 
   // Fit points to canvas with padding.
   let minX = Infinity,
     maxX = -Infinity,
     minY = Infinity,
     maxY = -Infinity;
-  for (const p of pts) {
+  for (const p of ptsAll) {
     minX = Math.min(minX, p.x);
     maxX = Math.max(maxX, p.x);
     minY = Math.min(minY, p.y);
@@ -223,37 +270,59 @@ function drawRoutePreview() {
   routeCtx.stroke();
   routeCtx.restore();
 
-  // Polyline
-  routeCtx.save();
-  routeCtx.strokeStyle = "rgba(10,132,255,0.95)";
-  routeCtx.lineWidth = 3;
-  routeCtx.lineJoin = "round";
-  routeCtx.lineCap = "round";
-  routeCtx.beginPath();
-  pts.forEach((p, idx) => {
-    const { cx, cy } = toCanvas(p);
-    if (idx === 0) routeCtx.moveTo(cx, cy);
-    else routeCtx.lineTo(cx, cy);
-  });
-  routeCtx.stroke();
-  routeCtx.restore();
+  function strokePath(points, style) {
+    if (points.length < 2) return;
+    routeCtx.save();
+    routeCtx.strokeStyle = style.strokeStyle;
+    routeCtx.lineWidth = style.lineWidth;
+    routeCtx.lineJoin = "round";
+    routeCtx.lineCap = "round";
+    routeCtx.beginPath();
+    points.forEach((p, idx) => {
+      const { cx, cy } = toCanvas(p);
+      if (idx === 0) routeCtx.moveTo(cx, cy);
+      else routeCtx.lineTo(cx, cy);
+    });
+    routeCtx.stroke();
+    routeCtx.restore();
+  }
+
+  // Draw secondary (listen source) first, lighter.
+  if (nodesSecondary.length > 0) {
+    const ptsS = [{ x: 0, y: 0, id: 0, kind: "origin2" }].concat(ptsSecondary);
+    strokePath(ptsS, { strokeStyle: "rgba(255,255,255,0.22)", lineWidth: 2 });
+  }
+
+  // Draw primary (current route) on top.
+  strokePath(ptsPrimary, { strokeStyle: "rgba(10,132,255,0.95)", lineWidth: 3 });
 
   // Points
   routeCtx.save();
-  for (const p of pts) {
+  for (const p of ptsPrimary) {
     const { cx, cy } = toCanvas(p);
     const isOrigin = p.id === 0;
     const isLive = p.id === -1;
-    routeCtx.fillStyle = isOrigin
-      ? "rgba(52,199,89,0.95)"
-      : isLive
-        ? "rgba(255,149,0,0.95)"
-        : "rgba(255,255,255,0.95)";
+    routeCtx.fillStyle = isOrigin ? "rgba(52,199,89,0.95)" : isLive ? "rgba(255,149,0,0.95)" : "rgba(255,255,255,0.95)";
     routeCtx.beginPath();
     routeCtx.arc(cx, cy, isOrigin ? 5 : isLive ? 5 : 4, 0, Math.PI * 2);
     routeCtx.fill();
   }
   routeCtx.restore();
+
+  // Highlight nearest listening node (only during recording + listen mode).
+  if (isRecording && sourceRoute && listenNearest.nodeId != null) {
+    const n = sourceRoute.nodes.find((x) => x.id === listenNearest.nodeId);
+    if (n) {
+      const { cx, cy } = toCanvas({ x: n.x, y: n.y });
+      routeCtx.save();
+      routeCtx.strokeStyle = "rgba(255,149,0,0.95)";
+      routeCtx.lineWidth = 3;
+      routeCtx.beginPath();
+      routeCtx.arc(cx, cy, 9, 0, Math.PI * 2);
+      routeCtx.stroke();
+      routeCtx.restore();
+    }
+  }
 }
 
 function renderNodesList() {
@@ -354,6 +423,189 @@ function renderRoutesPanel() {
 function updateDeleteRouteButton() {
   // Only allow deleting when not recording, and a route is selected.
   deleteRouteBtn.disabled = isRecording || !selectedRoute;
+}
+
+function renderListenRouteOptions() {
+  // Only saved routes can be listening sources.
+  const hasRoutes = routes.length > 0;
+  listenRouteSelect.disabled = !hasRoutes || isRecording; // keep stable during recording
+  listenToggleBtn.disabled = !hasRoutes;
+
+  const prev = listeningSourceRouteId;
+  listenRouteSelect.innerHTML = "";
+
+  if (!hasRoutes) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "Record a route first…";
+    listenRouteSelect.appendChild(opt);
+    listeningSourceRouteId = "";
+    return;
+  }
+
+  const opt0 = document.createElement("option");
+  opt0.value = "";
+  opt0.textContent = "Select a route…";
+  listenRouteSelect.appendChild(opt0);
+
+  for (const r of routes) {
+    const opt = document.createElement("option");
+    opt.value = r.id;
+    opt.textContent = `${r.name} (${r.nodes.length} nodes)`;
+    listenRouteSelect.appendChild(opt);
+  }
+
+  // Restore previous selection if still present.
+  if (prev && getRouteById(prev)) {
+    listeningSourceRouteId = prev;
+    listenRouteSelect.value = prev;
+  } else {
+    listeningSourceRouteId = "";
+    listenRouteSelect.value = "";
+  }
+}
+
+function setListenToggleUI() {
+  listenToggleBtn.textContent = listenModeEnabled ? "Disable Listen Mode" : "Enable Listen Mode";
+  listenToText.textContent = listeningSourceRouteId ? getRouteById(listeningSourceRouteId)?.name || "—" : "—";
+}
+
+function stopListeningPlayback(reason) {
+  if (currentlyPlayingNodeId != null) {
+    console.log("[listen] Stopping node", currentlyPlayingNodeId, reason ? `(${reason})` : "");
+  }
+  try {
+    listenAudio.pause();
+    listenAudio.currentTime = 0;
+  } catch {
+    // ignore
+  }
+  currentlyPlayingNodeId = null;
+  playbackText.textContent = "No nearby sound";
+}
+
+async function unlockAudioPlayback() {
+  // Attempt to "unlock" audio on iOS Safari by playing a short silent sound
+  // as a direct result of a user interaction (Enable Listen Mode tap).
+  // Not guaranteed on all iOS versions, but helps.
+  const silentWav =
+    "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+  try {
+    const prevSrc = listenAudio.src;
+    const prevVol = listenAudio.volume;
+    listenAudio.src = silentWav;
+    listenAudio.volume = 0;
+    await listenAudio.play();
+    listenAudio.pause();
+    listenAudio.currentTime = 0;
+    listenAudio.volume = prevVol;
+    listenAudio.src = prevSrc;
+    console.log("[listen] Audio unlocked");
+  } catch (e) {
+    console.log("[listen] Audio unlock failed", e);
+  }
+}
+
+function findNearestNode(currentX, currentY, sourceRoute) {
+  let best = null;
+  let bestD = Infinity;
+  for (const n of sourceRoute.nodes) {
+    const dx = currentX - n.x;
+    const dy = currentY - n.y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d < bestD) {
+      bestD = d;
+      best = n;
+    }
+  }
+  return { node: best, distance: bestD };
+}
+
+function updateListenModeThrottled() {
+  const now = performance.now();
+  if (now - lastListenUpdateMs < LISTEN_UPDATE_MS) return;
+  lastListenUpdateMs = now;
+  updateListenMode();
+}
+
+function updateListenMode() {
+  if (!listenModeEnabled) {
+    setListenWarn("");
+    listenNearest = { nodeId: null, distance: Infinity };
+    nearestNodeText.textContent = "—";
+    distanceText.textContent = "—";
+    playbackText.textContent = "No nearby sound";
+    scheduleRouteRedraw();
+    return;
+  }
+
+  const sourceRoute = getRouteById(listeningSourceRouteId);
+  if (!sourceRoute) {
+    setListenWarn("Select a listening route first.");
+    stopListeningPlayback("no source route");
+    listenNearest = { nodeId: null, distance: Infinity };
+    setListenToggleUI();
+    scheduleRouteRedraw();
+    return;
+  }
+  if (!sourceRoute.nodes || sourceRoute.nodes.length === 0) {
+    setListenWarn("Selected route has no nodes.");
+    stopListeningPlayback("source has no nodes");
+    listenNearest = { nodeId: null, distance: Infinity };
+    setListenToggleUI();
+    scheduleRouteRedraw();
+    return;
+  }
+
+  setListenWarn("");
+  setListenToggleUI();
+
+  const { node, distance } = findNearestNode(xMeters, yMeters, sourceRoute);
+  listenNearest = { nodeId: node?.id ?? null, distance };
+
+  const nearestLabel = node ? `Node ${node.id}` : "—";
+  nearestNodeText.textContent = nearestLabel;
+  distanceText.textContent = Number.isFinite(distance) ? `${distance.toFixed(1)} m` : "—";
+  console.log("[listen] Nearest node:", nearestLabel, "distance:", distance.toFixed(2));
+
+  // Listen Mode is intended for a new walk: only autoplay while recording.
+  if (!isRecording) {
+    playbackText.textContent = "Start a new walk to listen";
+    stopListeningPlayback("not recording");
+    scheduleRouteRedraw();
+    return;
+  }
+
+  const within = node && distance <= LISTEN_RADIUS_METERS;
+  if (!within) {
+    stopListeningPlayback("left radius");
+    scheduleRouteRedraw();
+    return;
+  }
+
+  // Within radius: play nearest node, but avoid restarting same node repeatedly.
+  if (currentlyPlayingNodeId === node.id) {
+    playbackText.textContent = `Now playing: Node ${node.id}`;
+    scheduleRouteRedraw();
+    return;
+  }
+
+  stopListeningPlayback("switch node");
+  currentlyPlayingNodeId = node.id;
+  playbackText.textContent = `Now playing: Node ${node.id}`;
+  console.log("[listen] Playing node", node.id);
+  try {
+    listenAudio.src = node.audioUrl;
+    listenAudio.currentTime = 0;
+    listenAudio.volume = 1;
+    const p = listenAudio.play();
+    if (p && typeof p.catch === "function") {
+      p.catch((e) => console.log("[listen] play() failed", e));
+    }
+  } catch (e) {
+    console.log("[listen] play error", e);
+  }
+  scheduleRouteRedraw();
 }
 
 async function requestMotionPermissionIfNeeded() {
@@ -713,10 +965,14 @@ async function endWalk() {
   }
 
   renderRoutesPanel();
+  renderListenRouteOptions();
   updateMetricsUI();
   renderNodesList();
   drawRoutePreview();
   updateDeleteRouteButton();
+
+  // Stop any listening playback when walk ends (keeps things predictable).
+  stopListeningPlayback("walk ended");
 }
 
 function deleteSelectedRoute() {
@@ -737,10 +993,20 @@ function deleteSelectedRoute() {
   selectedRoute = routes[0] || null;
 
   renderRoutesPanel();
+  renderListenRouteOptions();
   updateMetricsUI();
   renderNodesList();
   drawRoutePreview();
   updateDeleteRouteButton();
+
+  // If the listening source was deleted, disable listening.
+  if (listeningSourceRouteId && !getRouteById(listeningSourceRouteId)) {
+    listeningSourceRouteId = "";
+    listenModeEnabled = false;
+    stopListeningPlayback("source deleted");
+    setListenToggleUI();
+    renderListenRouteOptions();
+  }
 }
 
 // Buttons (must be user gesture)
@@ -758,6 +1024,29 @@ deleteRouteBtn.addEventListener("click", () => {
   deleteSelectedRoute();
 });
 
+listenRouteSelect.addEventListener("change", () => {
+  listeningSourceRouteId = listenRouteSelect.value;
+  const r = getRouteById(listeningSourceRouteId);
+  console.log("[listen] Listening source route selected:", r?.name || "none");
+  setListenToggleUI();
+  updateListenMode();
+});
+
+listenToggleBtn.addEventListener("click", async () => {
+  // User gesture: good place to unlock audio.
+  if (!listenModeEnabled) {
+    listenModeEnabled = true;
+    console.log("[listen] Listen Mode enabled");
+    await unlockAudioPlayback();
+  } else {
+    listenModeEnabled = false;
+    console.log("[listen] Listen Mode disabled");
+    stopListeningPlayback("disabled");
+  }
+  setListenToggleUI();
+  updateListenMode();
+});
+
 // Initial UI
 setButtonsForRecording(false);
 setStatus("Not recording");
@@ -765,6 +1054,9 @@ updateMetricsUI();
 drawRoutePreview();
 renderRoutesPanel();
 updateDeleteRouteButton();
+renderListenRouteOptions();
+setListenToggleUI();
+updateListenMode();
 
 console.log("[init] SoundRoute prototype loaded");
 

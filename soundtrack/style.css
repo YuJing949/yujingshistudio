@@ -125,6 +125,62 @@ body {
   line-height: 1.3;
 }
 
+.listen {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  margin: 10px 0 12px;
+}
+
+.listen-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0 10px;
+}
+
+.listen-top h2 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.2px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 10px;
+}
+
+.field-label {
+  color: var(--muted);
+  font-weight: 650;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+.select {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  padding: 12px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 16px;
+}
+
+.select:disabled {
+  opacity: 0.55;
+}
+
+.listen-status {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+}
+
 .btn {
   border: 1px solid var(--border);
   border-radius: 14px;

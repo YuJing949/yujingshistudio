@@ -27,6 +27,43 @@
         <ol id="routesList" class="routes-list"></ol>
       </section>
 
+      <section class="listen" aria-label="Listen Mode">
+        <div class="listen-top">
+          <h2>Listen Mode</h2>
+          <button id="listenToggleBtn" class="btn btn-ghost" type="button" disabled>
+            Enable Listen Mode
+          </button>
+        </div>
+
+        <label class="field">
+          <span class="field-label">Listen to route</span>
+          <select id="listenRouteSelect" class="select" disabled>
+            <option value="">Record a route first…</option>
+          </select>
+        </label>
+
+        <div id="listenWarn" class="error" hidden></div>
+
+        <div class="listen-status">
+          <div class="status-row">
+            <div class="status-label">Listening to</div>
+            <div id="listenToText" class="status-value">—</div>
+          </div>
+          <div class="status-row">
+            <div class="status-label">Nearest node</div>
+            <div id="nearestNodeText" class="status-value">—</div>
+          </div>
+          <div class="status-row">
+            <div class="status-label">Distance</div>
+            <div id="distanceText" class="status-value">—</div>
+          </div>
+          <div class="status-row">
+            <div class="status-label">Playback</div>
+            <div id="playbackText" class="status-value">No nearby sound</div>
+          </div>
+        </div>
+      </section>
+
       <section class="controls" aria-label="Recording controls">
         <button id="startBtn" class="btn btn-primary" type="button">Start New Walk</button>
         <button id="endBtn" class="btn btn-danger" type="button" disabled>End Walk</button>
