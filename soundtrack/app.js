@@ -42,6 +42,8 @@ let isRecording = false;
 let mediaStream = null;
 let mediaRecorder = null;
 let lastChunkStartMs = 0;
+let recordingLoopPromise = null;
+let activeChunkStopTimer = null;
 
 // Movement state
 let stepCount = 0;
@@ -402,60 +404,88 @@ async function startRecordingSession() {
     isRecording = true;
     startSensorTracking();
 
-    // 4) Start MediaRecorder as 8-second chunks.
+    // 4) Start MediaRecorder loop producing *independent* 8-second files.
+    //
+    // iPhone Safari gotcha:
+    // Using `mediaRecorder.start(timeslice)` can emit "fragment" blobs after the first one,
+    // which often won't play back as standalone audio files.
+    // So we STOP and RESTART recording every 8 seconds, building a self-contained Blob per node.
     if (!window.MediaRecorder) {
       throw new Error("MediaRecorder is not supported in this browser.");
     }
 
     const options = {};
-    // Safari support varies; let it choose if not supported.
-    // If your Safari supports it, you can uncomment:
+    // Safari support varies; letting it pick tends to be most compatible.
+    // You can experiment with explicit types later:
+    // options.mimeType = "audio/mp4";
     // options.mimeType = "audio/webm;codecs=opus";
-    mediaRecorder = new MediaRecorder(mediaStream, options);
 
     let nodeId = 1;
-    lastChunkStartMs = Date.now();
 
-    mediaRecorder.addEventListener("dataavailable", (ev) => {
-      // This fires every timeslice (CHUNK_MS), plus one final chunk on stop.
-      if (!ev.data || ev.data.size === 0) {
-        console.log("[audio] empty chunk ignored");
-        return;
+    const recordOneChunk = () =>
+      new Promise((resolve, reject) => {
+        const chunkStart = Date.now();
+        const chunks = [];
+
+        // Create a fresh MediaRecorder each chunk to maximize Safari compatibility.
+        const rec = new MediaRecorder(mediaStream, options);
+        mediaRecorder = rec;
+        lastChunkStartMs = chunkStart;
+
+        rec.addEventListener("dataavailable", (ev) => {
+          if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+        });
+        rec.addEventListener("error", (e) => reject(e));
+        rec.addEventListener("start", () => console.log("[audio] chunk started"));
+        rec.addEventListener("stop", () => {
+          console.log("[audio] chunk stopped");
+          const blob = new Blob(chunks, { type: chunks[0]?.type || rec.mimeType || "" });
+          const durationSeconds = Math.max(0.1, (Date.now() - chunkStart) / 1000);
+          resolve({ blob, durationSeconds, timestamp: Date.now() });
+        });
+
+        rec.start(); // no timeslice; we stop manually
+        activeChunkStopTimer = window.setTimeout(() => {
+          activeChunkStopTimer = null;
+          try {
+            if (rec.state !== "inactive") rec.stop();
+          } catch (e) {
+            reject(e);
+          }
+        }, CHUNK_MS);
+      });
+
+    const recordingLoop = async () => {
+      while (isRecording) {
+        const { blob, durationSeconds, timestamp } = await recordOneChunk();
+        if (!blob || blob.size === 0) {
+          console.log("[audio] empty chunk ignored");
+          continue;
+        }
+
+        const url = URL.createObjectURL(blob);
+        const node = {
+          id: nodeId++,
+          timestamp,
+          stepCount,
+          heading: headingDeg,
+          x: xMeters,
+          y: yMeters,
+          audioBlob: blob,
+          audioUrl: url,
+          durationSeconds: Math.round(durationSeconds),
+        };
+
+        audioNodes.push(node);
+        console.log("[node] saved", { ...node, audioBlob: `Blob(${blob.type || "unknown"}, ${blob.size} bytes)` });
+
+        updateMetricsUI();
+        renderNodesList();
+        drawRoutePreview();
       }
+    };
 
-      const now = Date.now();
-      const durationSeconds = CHUNK_SECONDS;
-
-      const blob = ev.data;
-      const url = URL.createObjectURL(blob);
-
-      const node = {
-        id: nodeId++,
-        timestamp: now,
-        stepCount,
-        heading: headingDeg,
-        x: xMeters,
-        y: yMeters,
-        audioBlob: blob,
-        audioUrl: url,
-        durationSeconds,
-      };
-
-      audioNodes.push(node);
-      console.log("[node] saved", node);
-
-      updateMetricsUI();
-      renderNodesList();
-      drawRoutePreview();
-      lastChunkStartMs = now;
-    });
-
-    mediaRecorder.addEventListener("start", () => console.log("[audio] recorder started"));
-    mediaRecorder.addEventListener("stop", () => console.log("[audio] recorder stopped"));
-    mediaRecorder.addEventListener("error", (e) => console.log("[audio] recorder error", e));
-
-    // Start with a timeslice so we get periodic chunks automatically.
-    mediaRecorder.start(CHUNK_MS);
+    recordingLoopPromise = recordingLoop();
 
     setStatus("Recording…");
     permText.textContent = formatPermStatus(["Microphone OK", "Motion listening", "Orientation listening"]);
@@ -486,13 +516,31 @@ async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, s
   isRecording = false;
   stopSensorTracking();
 
-  // Stop recorder (may emit a final dataavailable).
+  // Stop current chunk timer + recorder (may emit a final dataavailable).
+  try {
+    if (activeChunkStopTimer) {
+      clearTimeout(activeChunkStopTimer);
+      activeChunkStopTimer = null;
+    }
+  } catch (e) {
+    console.log("[rec] timer clear error", e);
+  }
+
   try {
     if (mediaRecorder && mediaRecorder.state !== "inactive") {
       mediaRecorder.stop();
     }
   } catch (e) {
     console.log("[rec] recorder stop error", e);
+  }
+
+  // Wait for the loop to finish cleanly (so the last chunk can be saved).
+  try {
+    if (recordingLoopPromise) await recordingLoopPromise;
+  } catch (e) {
+    console.log("[rec] loop await error", e);
+  } finally {
+    recordingLoopPromise = null;
   }
 
   // Stop mic tracks.
