@@ -15,13 +15,11 @@ const PEAK_THRESHOLD = 1.15; // magnitude delta threshold after filtering (appro
 const SMOOTHING_ALPHA = 0.85; // exponential smoothing for magnitude
 
 // Listen Mode tuning
-// - LISTEN_RADIUS: how close the user must be to "enter" a node's sound
-// - SWITCH_MARGIN: how much closer a new node must be before we switch (stability)
-// - SWITCH_COOLDOWN_MS: minimum time between switches (prevents flicker)
-const LISTEN_RADIUS = 5;
-const SWITCH_MARGIN = 0.8;
-const SWITCH_COOLDOWN_MS = 1200;
-const LISTEN_UPDATE_MS = 300;
+const DIRECTION_CONE_DEGREES = 45;
+const DIRECTION_UPDATE_INTERVAL_MS = 2000;
+const MAX_LISTEN_DISTANCE = 8;
+const VOLUME_UPDATE_INTERVAL_MS = 150;
+const MIN_LISTEN_VOLUME = 0.2;
 
 // In-memory route sessions (single-device, no backend).
 //
@@ -84,13 +82,28 @@ let listenModeEnabled = false;
 let listeningSourceRouteId = "";
 let currentlyPlayingNodeId = null;
 let listenNearest = { nodeId: null, distance: Infinity };
-let lastListenUpdateMs = 0;
-let lastSwitchTime = 0;
+let lastDirectionUpdateMs = 0;
 let currentAudio = null;
+let currentRouteDirectionDeg = NaN;
+let volumeUpdateTimer = null;
+let lastVolumeLogMs = 0;
 
 const listenAudio = new Audio();
 listenAudio.preload = "none";
 currentAudio = listenAudio;
+listenAudio.addEventListener("ended", () => {
+  console.log("[listen] Audio ended, recalculating");
+  if (volumeUpdateTimer) {
+    clearInterval(volumeUpdateTimer);
+    volumeUpdateTimer = null;
+  }
+  currentRouteDirectionDeg = NaN;
+  currentAudio = null;
+  currentlyPlayingNodeId = null;
+  // Immediately re-evaluate based on current heading + position.
+  lastDirectionUpdateMs = 0;
+  updateListenMode(xMeters, yMeters, headingDeg);
+});
 
 // Route redraw throttling (avoid redrawing on every motion event)
 let routeRedrawPending = false;
@@ -502,6 +515,11 @@ function stopListeningPlayback(reason) {
   } catch {
     // ignore
   }
+  if (volumeUpdateTimer) {
+    clearInterval(volumeUpdateTimer);
+    volumeUpdateTimer = null;
+  }
+  currentRouteDirectionDeg = NaN;
   currentAudio = null;
   currentlyPlayingNodeId = null;
   playbackText.textContent = "No nearby sound";
@@ -540,27 +558,107 @@ function getDistanceToNode(node, currentX, currentY) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-function findNearestNode(currentX, currentY, sourceRoute) {
-  let best = null;
-  let bestD = Infinity;
-  for (const n of sourceRoute.nodes) {
-    const d = getDistanceToNode(n, currentX, currentY);
-    if (d < bestD) {
-      bestD = d;
-      best = n;
-    }
+function getBearingToNode(currentX, currentY, node) {
+  // 0 = north (+y), 90 = east (+x), 180 = south (-y), 270 = west (-x)
+  const dx = node.x - currentX;
+  const dy = node.y - currentY;
+  const deg = (Math.atan2(dx, dy) * 180) / Math.PI;
+  return normalizeHeading(deg);
+}
+
+function getAngleDifference(a, b) {
+  // Smallest difference in degrees: 0..180
+  const diff = Math.abs(normalizeHeading(a) - normalizeHeading(b));
+  return diff > 180 ? 360 - diff : diff;
+}
+
+function getRouteDirectionForNode(sourceRoute, node) {
+  // Direction implied by the route: from this node to the next node.
+  const idx = sourceRoute.nodes.findIndex((n) => n.id === node.id);
+  const next = idx >= 0 ? sourceRoute.nodes[idx + 1] : null;
+  if (next) {
+    const dx = next.x - node.x;
+    const dy = next.y - node.y;
+    const deg = (Math.atan2(dx, dy) * 180) / Math.PI;
+    return normalizeHeading(deg);
   }
-  return { node: best, distance: bestD };
+  // Fallback: recorded node heading.
+  if (Number.isFinite(node.heading)) return normalizeHeading(node.heading);
+  return NaN;
+}
+
+function mapVolumeFromAngleDiff(angleDiff) {
+  // Mapping:
+  // <=20° => 1
+  // 20..90 => 1 down to 0.2
+  // >90 => 0.2
+  if (!Number.isFinite(angleDiff)) return 1;
+  let v = 1;
+  if (angleDiff <= 20) v = 1;
+  else if (angleDiff <= 90) v = 1 - ((angleDiff - 20) / 70) * 0.8;
+  else v = MIN_LISTEN_VOLUME;
+  v = Math.min(1, Math.max(MIN_LISTEN_VOLUME, v));
+  return v;
+}
+
+function startVolumeTracking() {
+  if (volumeUpdateTimer) {
+    clearInterval(volumeUpdateTimer);
+    volumeUpdateTimer = null;
+  }
+  volumeUpdateTimer = setInterval(() => {
+    if (!listenModeEnabled) return;
+    if (!currentAudio || currentAudio.paused) return;
+    if (!Number.isFinite(currentRouteDirectionDeg)) return;
+    if (!Number.isFinite(headingDeg)) return;
+
+    const angleDiff = getAngleDifference(headingDeg, currentRouteDirectionDeg);
+    const v = mapVolumeFromAngleDiff(angleDiff);
+    currentAudio.volume = v;
+
+    // Optional UI: show angle + volume.
+    // Keep it short to avoid UI jitter: only update playbackText.
+    playbackText.textContent = `Playing Node ${currentlyPlayingNodeId} (Angle ${angleDiff.toFixed(0)}° / v=${v.toFixed(
+      2
+    )})`;
+
+    const now = performance.now();
+    if (now - lastVolumeLogMs > 1200) {
+      lastVolumeLogMs = now;
+      console.log("[listen] Route direction:", currentRouteDirectionDeg.toFixed(0));
+      console.log("[listen] User heading:", headingDeg.toFixed(0));
+      console.log("[listen] Angle diff:", angleDiff.toFixed(1));
+      console.log("[listen] Volume set to:", v.toFixed(2));
+    }
+  }, VOLUME_UPDATE_INTERVAL_MS);
+}
+
+function findDirectionalNearestNode(currentX, currentY, heading, sourceRoute) {
+  const candidates = [];
+  for (const n of sourceRoute.nodes) {
+    const distance = getDistanceToNode(n, currentX, currentY);
+    if (!(distance <= MAX_LISTEN_DISTANCE)) continue;
+
+    const bearing = getBearingToNode(currentX, currentY, n);
+    const angleDiff = getAngleDifference(heading, bearing);
+    if (angleDiff > DIRECTION_CONE_DEGREES) continue;
+
+    candidates.push({ node: n, distance, bearing, angleDiff });
+  }
+
+  candidates.sort((a, b) => a.distance - b.distance);
+  console.log("[listen] Candidate nodes:", candidates.length);
+
+  return candidates[0] || null;
 }
 
 function updateListenModeThrottled() {
-  const now = performance.now();
-  if (now - lastListenUpdateMs < LISTEN_UPDATE_MS) return;
-  lastListenUpdateMs = now;
-  updateListenMode(xMeters, yMeters);
+  // Direction mode doesn't update every step; selection happens periodically
+  // and on audio-ended events.
+  updateListenMode(xMeters, yMeters, headingDeg);
 }
 
-function updateListenMode(currentX, currentY) {
+function updateListenMode(currentX, currentY, heading) {
   if (!listenModeEnabled) {
     setListenWarn("");
     listenNearest = { nodeId: null, distance: Infinity };
@@ -592,131 +690,73 @@ function updateListenMode(currentX, currentY) {
   setListenWarn("");
   setListenToggleUI();
 
-  const { node: nearestNode, distance: nearestDistance } = findNearestNode(currentX, currentY, sourceRoute);
-  const playingNode =
-    currentlyPlayingNodeId != null ? sourceRoute.nodes.find((n) => n.id === currentlyPlayingNodeId) : null;
-  const playingDistance = playingNode ? getDistanceToNode(playingNode, currentX, currentY) : Infinity;
-
-  listenNearest = { nodeId: nearestNode?.id ?? null, distance: nearestDistance };
-
-  const nearestLabel = nearestNode ? `Node ${nearestNode.id}` : "—";
-  nearestNodeText.textContent = nearestLabel;
-  distanceText.textContent = Number.isFinite(nearestDistance) ? `${nearestDistance.toFixed(1)} m` : "—";
-  console.log("[listen] Nearest node:", nearestLabel, "distance:", nearestDistance.toFixed(2));
-
   // Listen Mode is intended for a new walk: only autoplay while recording.
   if (!isRecording) {
-    playbackText.textContent = "Start a new walk to listen";
+    playbackText.textContent = "Listen Mode enabled";
+    // Do not autoplay when not recording.
     stopListeningPlayback("not recording");
     scheduleRouteRedraw();
     return;
   }
 
+  // Heading is required to decide what's "in front".
+  if (!Number.isFinite(heading)) {
+    playbackText.textContent = "Waiting for heading…";
+    nearestNodeText.textContent = "—";
+    distanceText.textContent = "—";
+    listenNearest = { nodeId: null, distance: Infinity };
+    scheduleRouteRedraw();
+    console.log("[listen] Waiting for heading…");
+    return;
+  }
+
+  console.log("[listen] Heading:", heading.toFixed(0));
+
+  // If audio is currently playing, do NOT interrupt.
+  if (currentAudio && !currentAudio.paused && currentlyPlayingNodeId != null) {
+    console.log("[listen] Audio playing, not interrupting");
+    playbackText.textContent = `Playing Node ${currentlyPlayingNodeId}`;
+    scheduleRouteRedraw();
+    return;
+  }
+
+  // When not playing, only update selection periodically.
   const now = performance.now();
-  const cooldownOk = now - lastSwitchTime >= SWITCH_COOLDOWN_MS;
+  if (now - lastDirectionUpdateMs < DIRECTION_UPDATE_INTERVAL_MS) {
+    // Keep UI showing last candidate.
+    playbackText.textContent = "Listen Mode enabled";
+    scheduleRouteRedraw();
+    return;
+  }
+  lastDirectionUpdateMs = now;
 
-  const nearestWithin = nearestNode && nearestDistance <= LISTEN_RADIUS;
-  const playingWithin = playingNode && playingDistance <= LISTEN_RADIUS;
-
-  // If nothing is currently playing: play nearest if within radius.
-  if (currentlyPlayingNodeId == null) {
-    if (nearestWithin) {
-      console.log("[listen] Switching to node", nearestNode.id, "(start)");
-      currentlyPlayingNodeId = nearestNode.id;
-      lastSwitchTime = now;
-      playbackText.textContent = `Playing Node ${nearestNode.id}`;
-      try {
-        if (!currentAudio) currentAudio = listenAudio;
-        currentAudio.src = nearestNode.audioUrl;
-        currentAudio.currentTime = 0;
-        currentAudio.volume = 1;
-        const p = currentAudio.play();
-        if (p && typeof p.catch === "function") p.catch((e) => console.log("[listen] play() failed", e));
-      } catch (e) {
-        console.log("[listen] play error", e);
-      }
-    } else {
-      console.log("[listen] Stopping playback, no nearby node");
-      stopListeningPlayback("no nearby node");
-    }
+  const best = findDirectionalNearestNode(currentX, currentY, heading, sourceRoute);
+  if (!best) {
+    nearestNodeText.textContent = "—";
+    distanceText.textContent = "—";
+    playbackText.textContent = "No node in front";
+    listenNearest = { nodeId: null, distance: Infinity };
+    console.log("[listen] No node in front");
     scheduleRouteRedraw();
     return;
   }
 
-  // If nearest node is the same as the currently playing node: keep it.
-  if (nearestNode && nearestNode.id === currentlyPlayingNodeId) {
-    console.log("[listen] Keeping current node");
-    playbackText.textContent = `Playing Node ${currentlyPlayingNodeId}`;
-    scheduleRouteRedraw();
-    return;
+  const { node, distance, bearing, angleDiff } = best;
+  listenNearest = { nodeId: node.id, distance };
+  nearestNodeText.textContent = `Node ${node.id}`;
+  distanceText.textContent = `${distance.toFixed(1)}m / ${angleDiff.toFixed(0)}°`;
+  console.log("[listen] Selected directional node:", `Node ${node.id}`, "distance", distance.toFixed(2), "angleDiff", angleDiff.toFixed(1), "bearing", bearing.toFixed(0));
+
+  // Play it (no interruption logic; this only runs when we're not already playing).
+  currentlyPlayingNodeId = node.id;
+  playbackText.textContent = `Playing Node ${node.id}`;
+  currentRouteDirectionDeg = getRouteDirectionForNode(sourceRoute, node);
+  if (Number.isFinite(currentRouteDirectionDeg)) {
+    console.log("[listen] Route direction:", currentRouteDirectionDeg.toFixed(0));
   }
-
-  // If currently playing node is still within radius: lock on unless switch conditions are met.
-  if (playingWithin) {
-    if (nearestWithin) {
-      const marginOk = playingDistance - nearestDistance >= SWITCH_MARGIN;
-      if (!marginOk) {
-        console.log("[listen] Switch blocked by margin");
-        playbackText.textContent = `Locked on Node ${currentlyPlayingNodeId}`;
-        scheduleRouteRedraw();
-        return;
-      }
-      if (!cooldownOk) {
-        console.log("[listen] Switch blocked by cooldown");
-        playbackText.textContent = `Locked on Node ${currentlyPlayingNodeId}`;
-        scheduleRouteRedraw();
-        return;
-      }
-
-      console.log("[listen] Switching to node", nearestNode.id);
-      stopListeningPlayback("switch");
-      currentlyPlayingNodeId = nearestNode.id;
-      lastSwitchTime = now;
-      playbackText.textContent = `Playing Node ${nearestNode.id}`;
-      try {
-        if (!currentAudio) currentAudio = listenAudio;
-        currentAudio.src = nearestNode.audioUrl;
-        currentAudio.currentTime = 0;
-        currentAudio.volume = 1;
-        const p = currentAudio.play();
-        if (p && typeof p.catch === "function") p.catch((e) => console.log("[listen] play() failed", e));
-      } catch (e) {
-        console.log("[listen] play error", e);
-      }
-      scheduleRouteRedraw();
-      return;
-    }
-
-    console.log("[listen] Keeping current node");
-    playbackText.textContent = `Playing Node ${currentlyPlayingNodeId}`;
-    scheduleRouteRedraw();
-    return;
-  }
-
-  // Currently playing node is outside radius.
-  if (!nearestWithin) {
-    console.log("[listen] Stopping playback, no nearby node");
-    stopListeningPlayback("no nearby node");
-    scheduleRouteRedraw();
-    return;
-  }
-
-  // There is a valid nearby node. Switch to it, respecting cooldown if possible.
-  if (!cooldownOk) {
-    console.log("[listen] Switch blocked by cooldown");
-    playbackText.textContent = "No nearby sound";
-    scheduleRouteRedraw();
-    return;
-  }
-
-  console.log("[listen] Switching to node", nearestNode.id);
-  stopListeningPlayback("switch (out of radius)");
-  currentlyPlayingNodeId = nearestNode.id;
-  lastSwitchTime = now;
-  playbackText.textContent = `Playing Node ${nearestNode.id}`;
   try {
     if (!currentAudio) currentAudio = listenAudio;
-    currentAudio.src = nearestNode.audioUrl;
+    currentAudio.src = node.audioUrl;
     currentAudio.currentTime = 0;
     currentAudio.volume = 1;
     const p = currentAudio.play();
@@ -724,6 +764,7 @@ function updateListenMode(currentX, currentY) {
   } catch (e) {
     console.log("[listen] play error", e);
   }
+  startVolumeTracking();
   scheduleRouteRedraw();
 }
 
@@ -876,6 +917,7 @@ function resetSessionState() {
   lastOrientationLogMs = 0;
   isCalibrating = false;
   listenNearest = { nodeId: null, distance: Infinity };
+  lastDirectionUpdateMs = 0;
 
   updateMetricsUI();
   renderNodesList();
@@ -1230,7 +1272,8 @@ listenToggleBtn.addEventListener("click", async () => {
     stopListeningPlayback("disabled");
   }
   setListenToggleUI();
-  updateListenMode();
+  lastDirectionUpdateMs = 0;
+  updateListenMode(xMeters, yMeters, headingDeg);
 });
 
 // Initial UI
