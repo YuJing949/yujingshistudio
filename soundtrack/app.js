@@ -11,10 +11,6 @@ const CHUNK_MS = CHUNK_SECONDS * 1000;
 const CHUNK_HARD_TIMEOUT_MS = CHUNK_MS + 6000;
 const CHUNK_MAX_CONSECUTIVE_FAILURES = 8;
 const CHUNK_RETRY_BACKOFF_MS = 400;
-// While recording, refresh metrics + map on a timer so heading/live redraw stay smooth;
-// position (x/y) still updates only on detected steps — no extra dead reckoning.
-const RECORDING_UI_TICK_MS = 110;
-const MAX_EMPTY_CHUNKS_BEFORE_FAIL = 3;
 
 // Simple step detection tuning knobs.
 // These are intentionally conservative; step detection on phones varies a lot.
@@ -117,8 +113,6 @@ let lastChunkStartMs = 0;
 let recordingLoopPromise = null;
 let activeChunkStopTimer = null;
 let recordingSessionToken = 0;
-let recordingSessionStarting = false;
-let recordingUiTickTimer = null;
 
 // Listen Mode state
 let listenModeEnabled = false;
@@ -159,22 +153,6 @@ function scheduleRouteRedraw() {
   });
 }
 
-function stopRecordingUiTick() {
-  if (recordingUiTickTimer != null) {
-    clearInterval(recordingUiTickTimer);
-    recordingUiTickTimer = null;
-  }
-}
-
-function startRecordingUiTick() {
-  stopRecordingUiTick();
-  recordingUiTickTimer = window.setInterval(() => {
-    if (!isRecording) return;
-    updateMetricsUI();
-    scheduleRouteRedraw();
-  }, RECORDING_UI_TICK_MS);
-}
-
 // Movement state
 let stepCount = 0;
 let headingDeg = NaN; // 0..360 (0 = North)
@@ -200,6 +178,10 @@ function makeId() {
 }
 
 function getViewingRoute() {
+  // While recording, never fall back to a previously selected saved route (would show wrong nodes + only live moving).
+  if (isRecording && currentRecordingRoute) {
+    return currentRecordingRoute;
+  }
   // Prefer in-progress or unsaved draft route so the map matches partial saves after errors.
   return currentRecordingRoute ?? selectedRoute;
 }
@@ -272,6 +254,48 @@ function updatePositionForStep() {
   yMeters += STEP_LENGTH_METERS * Math.cos(h);
   scheduleRouteRedraw();
   updateListenModeThrottled();
+}
+
+// Meters — snap estimated positions this close into one "stack" for display.
+const COINCIDENT_NODE_GRID_M = 0.04;
+const COINCIDENT_NODE_SPREAD_M = 0.16;
+
+/**
+ * Several audio nodes can share the same estimated (x,y) (e.g. heading not ready yet). Dots are drawn in order
+ * and the orange live marker is on top, so stacked white nodes look "missing". Spread only for drawing markers;
+ * the polyline still uses true coordinates.
+ */
+function spreadCoincidentNodeMarkersForDisplay(points) {
+  const audioPts = points.filter((p) => p.id > 0);
+  const keyCounts = new Map();
+  for (const p of audioPts) {
+    const key = `${Math.round(p.x / COINCIDENT_NODE_GRID_M)},${Math.round(p.y / COINCIDENT_NODE_GRID_M)}`;
+    keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
+  }
+  const keyIndex = new Map();
+  const out = [];
+  for (const p of points) {
+    if (p.id <= 0) {
+      out.push(p);
+      continue;
+    }
+    const key = `${Math.round(p.x / COINCIDENT_NODE_GRID_M)},${Math.round(p.y / COINCIDENT_NODE_GRID_M)}`;
+    const total = keyCounts.get(key) || 1;
+    const i = keyIndex.get(key) || 0;
+    keyIndex.set(key, i + 1);
+    if (total <= 1) {
+      out.push(p);
+      continue;
+    }
+    const ang = (2 * Math.PI * i) / Math.min(total, 12);
+    const ring = COINCIDENT_NODE_SPREAD_M * (1 + Math.floor(i / 12));
+    out.push({
+      ...p,
+      x: p.x + ring * Math.cos(ang),
+      y: p.y + ring * Math.sin(ang),
+    });
+  }
+  return out;
 }
 
 function drawRoutePreview() {
@@ -391,9 +415,10 @@ function drawRoutePreview() {
   // Draw primary (current route) on top.
   strokePath(ptsPrimary, { strokeStyle: "rgba(10,132,255,0.95)", lineWidth: 3 });
 
-  // Points
+  // Points (spread coincident audio nodes so they are not hidden under the live marker)
+  const ptsPrimaryMarkers = spreadCoincidentNodeMarkersForDisplay(ptsPrimary);
   routeCtx.save();
-  for (const p of ptsPrimary) {
+  for (const p of ptsPrimaryMarkers) {
     const { cx, cy } = toCanvas(p);
     const isOrigin = p.id === 0;
     const isLive = p.id === -1;
@@ -939,7 +964,6 @@ function startSensorTracking() {
     if (Number.isFinite(h)) {
       headingDeg = normalizeHeading(h);
       updateMetricsUI();
-      scheduleRouteRedraw();
       // Debug: current heading (occasionally).
       if (nowLog - lastOrientationLogMs > 1500) {
         console.log("[orientation] headingDeg", headingDeg.toFixed(0));
@@ -1001,10 +1025,6 @@ async function startRecordingSession() {
     console.warn("[rec] start ignored; already recording");
     return;
   }
-  if (recordingSessionStarting) {
-    debugLog("[rec] start ignored; session already initializing");
-    return;
-  }
 
   if (!currentRecordingRoute) {
     // Start is routed through "Start New Walk" and should always set a route,
@@ -1012,14 +1032,12 @@ async function startRecordingSession() {
     throw new Error("No current route. Tap “Start New Walk” to create a route first.");
   }
 
-  recordingSessionStarting = true;
-  try {
-    setError("");
-    setStatus("Requesting permissions…");
-    permText.textContent = "Requesting microphone + motion + orientation permissions…";
-    setButtonsForRecording(true);
+  setError("");
+  setStatus("Requesting permissions…");
+  permText.textContent = "Requesting microphone + motion + orientation permissions…";
+  setButtonsForRecording(true);
 
-    try {
+  try {
     const token = (recordingSessionToken += 1);
 
     // Reset state at the start of each session.
@@ -1054,17 +1072,16 @@ async function startRecordingSession() {
     console.log("[sensors] Calibrating sensors…");
     await sleep(2500);
     if (!isRecording || token !== recordingSessionToken) {
-      // Walk ended or a new session started while we were waiting.
+      debugLog("[rec] post-calibration bail — cleaning up", {
+        isRecording,
+        token,
+        recordingSessionToken,
+      });
+      // Avoid leaving isRecording/mic/sensors stuck without a chunk loop (e.g. superseded session token).
+      await stopRecordingSession({ keepNodes: true, silent: true });
       return;
     }
     isCalibrating = false;
-
-    const routeForRecording = currentRecordingRoute;
-    if (!routeForRecording) {
-      throw new Error("Recording route was cleared before capture started.");
-    }
-    debugLog("[rec] capture route locked", { id: routeForRecording.id, name: routeForRecording.name });
-    startRecordingUiTick();
 
     // 5) Start MediaRecorder loop producing *independent* 8-second files.
     //
@@ -1083,7 +1100,7 @@ async function startRecordingSession() {
     // options.mimeType = "audio/webm;codecs=opus";
 
     // Node ids are incremental within a route.
-    let nodeId = routeForRecording.nodes.length + 1;
+    let nodeId = currentRecordingRoute.nodes.length + 1;
 
     const recordOneChunk = () =>
       new Promise((resolve, reject) => {
@@ -1172,13 +1189,6 @@ async function startRecordingSession() {
           try {
             if (rec.state !== "inactive") {
               debugLog("[audio] chunk timer fired → stop()", { state: rec.state });
-              if (typeof rec.requestData === "function") {
-                try {
-                  rec.requestData();
-                } catch (e) {
-                  debugLog("[audio] requestData before stop", e?.message || e);
-                }
-              }
               rec.stop();
             } else {
               debugLog("[audio] chunk timer fired but recorder already inactive");
@@ -1193,31 +1203,16 @@ async function startRecordingSession() {
 
     const recordingLoop = async () => {
       let consecutiveFailures = 0;
-      let consecutiveEmptyChunks = 0;
       try {
         while (isRecording) {
           try {
-            if (routeForRecording !== currentRecordingRoute) {
-              debugLog("[rec] route reference mismatch — stopping loop", {
-                locked: routeForRecording?.id,
-                current: currentRecordingRoute?.id,
-              });
-              break;
-            }
             const { blob, durationSeconds, timestamp } = await recordOneChunk();
             consecutiveFailures = 0;
 
             if (!blob || blob.size === 0) {
-              consecutiveEmptyChunks += 1;
-              debugLog("[audio] empty chunk", { consecutiveEmptyChunks });
-              if (consecutiveEmptyChunks >= MAX_EMPTY_CHUNKS_BEFORE_FAIL) {
-                throw new Error(
-                  "MediaRecorder returned empty audio repeatedly (no bytes). Try End Walk and Start New Walk.",
-                );
-              }
+              debugLog("[audio] empty chunk ignored");
               continue;
             }
-            consecutiveEmptyChunks = 0;
 
             const url = URL.createObjectURL(blob);
             const node = {
@@ -1232,11 +1227,13 @@ async function startRecordingSession() {
               durationSeconds: Math.round(durationSeconds),
             };
 
-            routeForRecording.nodes.push(node);
-            debugLog("[route] Node added", routeForRecording.name, {
+            currentRecordingRoute.nodes.push(node);
+            debugLog("[route] Node added", currentRecordingRoute.name, {
               id: node.id,
               bytes: blob.size,
               type: blob.type || "unknown",
+              x: node.x,
+              y: node.y,
             });
 
             updateMetricsUI();
@@ -1279,7 +1276,7 @@ async function startRecordingSession() {
 
     // Important: audio playback must be user-initiated on iOS. We only render controls;
     // user tapping play is a gesture, so that's OK.
-    debugLog("[rec] session started", { chunkMs: CHUNK_MS, route: routeForRecording?.name });
+    debugLog("[rec] session started", { chunkMs: CHUNK_MS, route: currentRecordingRoute?.name });
   } catch (err) {
     debugLog("[rec] start failed:", err?.message || err);
     setError(err?.message || String(err));
@@ -1289,14 +1286,10 @@ async function startRecordingSession() {
     // Clean up any partial state.
     await stopRecordingSession({ keepNodes: true, silent: true });
     setButtonsForRecording(false);
-    }
-  } finally {
-    recordingSessionStarting = false;
   }
 }
 
 async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, silent: false }) {
-  stopRecordingUiTick();
   if (!isRecording && !mediaRecorder && !mediaStream) {
     if (!silent) console.warn("[rec] stop ignored; nothing to stop");
     return;
@@ -1357,6 +1350,10 @@ async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, s
 
 function startNewWalk() {
   if (isRecording) return;
+
+  // Close the race where two taps queue two sessions before setButtonsForRecording(true) runs.
+  startBtn.disabled = true;
+  endBtn.disabled = true;
 
   routeCounter += 1;
   const route = {
