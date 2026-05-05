@@ -120,6 +120,17 @@
         <ol id="nodesList" class="nodes-list"></ol>
       </section>
 
+      <details class="debug-panel" id="debugPanel">
+        <summary>Debug log (on-device)</summary>
+        <p class="debug-hint">
+          Same messages as <code>console.log</code>; use when Safari has no devtools attached.
+        </p>
+        <div class="debug-actions">
+          <button id="debugClearBtn" class="btn btn-ghost" type="button">Clear log</button>
+        </div>
+        <pre id="debugLogPre" class="debug-log" aria-live="polite"></pre>
+      </details>
+
       <footer class="footer">
         <p class="footnote">
           Tip: keep the phone in a consistent orientation while walking for better heading.

@@ -7,6 +7,10 @@
 const STEP_LENGTH_METERS = 0.7;
 const CHUNK_SECONDS = 8;
 const CHUNK_MS = CHUNK_SECONDS * 1000;
+// If Safari never fires `stop` after `rec.stop()`, unblock the recording loop.
+const CHUNK_HARD_TIMEOUT_MS = CHUNK_MS + 6000;
+const CHUNK_MAX_CONSECUTIVE_FAILURES = 8;
+const CHUNK_RETRY_BACKOFF_MS = 400;
 
 // Simple step detection tuning knobs.
 // These are intentionally conservative; step detection on phones varies a lot.
@@ -66,6 +70,39 @@ const nodesList = document.getElementById("nodesList");
 const nodesEmpty = document.getElementById("nodesEmpty");
 const routeCanvas = document.getElementById("routeCanvas");
 const routeCtx = routeCanvas.getContext("2d");
+
+const debugLogPre = document.getElementById("debugLogPre");
+const debugClearBtn = document.getElementById("debugClearBtn");
+const MAX_DEBUG_LOG_LINES = 250;
+
+function debugLog(...args) {
+  console.log(...args);
+  if (!debugLogPre) return;
+  const ts = new Date().toISOString().slice(11, 23);
+  const text = args
+    .map((a) => {
+      if (a == null) return String(a);
+      if (typeof a === "string") return a;
+      if (typeof a === "number" || typeof a === "boolean") return String(a);
+      if (a instanceof Error) return a.message || String(a);
+      try {
+        return JSON.stringify(a);
+      } catch {
+        return String(a);
+      }
+    })
+    .join(" ");
+  debugLogPre.textContent += `[${ts}] ${text}\n`;
+  const lines = debugLogPre.textContent.split("\n");
+  if (lines.length > MAX_DEBUG_LOG_LINES) {
+    debugLogPre.textContent = lines.slice(-MAX_DEBUG_LOG_LINES).join("\n");
+  }
+  debugLogPre.scrollTop = debugLogPre.scrollHeight;
+}
+
+debugClearBtn?.addEventListener("click", () => {
+  if (debugLogPre) debugLogPre.textContent = "";
+});
 
 // Session state
 let isRecording = false;
@@ -141,7 +178,8 @@ function makeId() {
 }
 
 function getViewingRoute() {
-  return isRecording ? currentRecordingRoute : selectedRoute;
+  // Prefer in-progress or unsaved draft route so the map matches partial saves after errors.
+  return currentRecordingRoute ?? selectedRoute;
 }
 
 function getViewingNodes() {
@@ -925,8 +963,9 @@ function resetSessionState() {
 }
 
 function setButtonsForRecording(recording) {
-  startBtn.disabled = recording;
-  endBtn.disabled = !recording;
+  const draft = currentRecordingRoute != null;
+  startBtn.disabled = recording || draft;
+  endBtn.disabled = !recording && !draft;
   updateDeleteRouteButton();
 }
 
@@ -1012,67 +1051,165 @@ async function startRecordingSession() {
 
     const recordOneChunk = () =>
       new Promise((resolve, reject) => {
+        let settled = false;
+        let chunkTimer = null;
+        let hardTimer = null;
+
+        const cleanupTimers = () => {
+          if (chunkTimer != null) {
+            clearTimeout(chunkTimer);
+            chunkTimer = null;
+            activeChunkStopTimer = null;
+          }
+          if (hardTimer != null) {
+            clearTimeout(hardTimer);
+            hardTimer = null;
+          }
+        };
+
+        const finish = (payload) => {
+          if (settled) return;
+          settled = true;
+          cleanupTimers();
+          resolve(payload);
+        };
+
+        const fail = (err) => {
+          if (settled) return;
+          settled = true;
+          cleanupTimers();
+          reject(err instanceof Error ? err : new Error(String(err)));
+        };
+
         const chunkStart = Date.now();
         const chunks = [];
 
-        // Create a fresh MediaRecorder each chunk to maximize Safari compatibility.
-        const rec = new MediaRecorder(mediaStream, options);
+        let rec;
+        try {
+          rec = new MediaRecorder(mediaStream, options);
+        } catch (e) {
+          debugLog("[audio] MediaRecorder constructor failed", e?.message || e);
+          fail(e);
+          return;
+        }
+
         mediaRecorder = rec;
         lastChunkStartMs = chunkStart;
 
         rec.addEventListener("dataavailable", (ev) => {
           if (ev.data && ev.data.size > 0) chunks.push(ev.data);
         });
-        rec.addEventListener("error", (e) => reject(e));
-        rec.addEventListener("start", () => console.log("[audio] chunk started"));
+        rec.addEventListener("error", (e) => {
+          const err = e.error || e;
+          debugLog("[audio] MediaRecorder error event", err?.name, err?.message || err);
+          fail(err);
+        });
+        rec.addEventListener("start", () => {
+          debugLog("[audio] chunk started", { mime: rec.mimeType, state: rec.state });
+        });
         rec.addEventListener("stop", () => {
-          console.log("[audio] chunk stopped");
+          const totalBytes = chunks.reduce((s, b) => s + b.size, 0);
+          debugLog("[audio] chunk stopped", { parts: chunks.length, totalBytes });
           const blob = new Blob(chunks, { type: chunks[0]?.type || rec.mimeType || "" });
           const durationSeconds = Math.max(0.1, (Date.now() - chunkStart) / 1000);
-          resolve({ blob, durationSeconds, timestamp: Date.now() });
+          finish({ blob, durationSeconds, timestamp: Date.now() });
         });
 
-        rec.start(); // no timeslice; we stop manually
-        activeChunkStopTimer = window.setTimeout(() => {
+        try {
+          rec.start();
+        } catch (e) {
+          debugLog("[audio] rec.start() failed", e?.message || e);
+          fail(e);
+          return;
+        }
+
+        hardTimer = window.setTimeout(() => {
+          hardTimer = null;
+          if (settled) return;
+          debugLog("[audio] chunk HARD timeout (no stop event)", { ms: CHUNK_HARD_TIMEOUT_MS });
+          fail(new Error("Audio chunk stalled: MediaRecorder did not finish"));
+        }, CHUNK_HARD_TIMEOUT_MS);
+
+        chunkTimer = window.setTimeout(() => {
+          chunkTimer = null;
           activeChunkStopTimer = null;
           try {
-            if (rec.state !== "inactive") rec.stop();
+            if (rec.state !== "inactive") {
+              debugLog("[audio] chunk timer fired → stop()", { state: rec.state });
+              rec.stop();
+            } else {
+              debugLog("[audio] chunk timer fired but recorder already inactive");
+            }
           } catch (e) {
-            reject(e);
+            debugLog("[audio] rec.stop() threw", e?.message || e);
+            fail(e);
           }
         }, CHUNK_MS);
+        activeChunkStopTimer = chunkTimer;
       });
 
     const recordingLoop = async () => {
-      while (isRecording) {
-        const { blob, durationSeconds, timestamp } = await recordOneChunk();
-        if (!blob || blob.size === 0) {
-          console.log("[audio] empty chunk ignored");
-          continue;
+      let consecutiveFailures = 0;
+      try {
+        while (isRecording) {
+          try {
+            const { blob, durationSeconds, timestamp } = await recordOneChunk();
+            consecutiveFailures = 0;
+
+            if (!blob || blob.size === 0) {
+              debugLog("[audio] empty chunk ignored");
+              continue;
+            }
+
+            const url = URL.createObjectURL(blob);
+            const node = {
+              id: nodeId++,
+              timestamp,
+              stepCount,
+              heading: headingDeg,
+              x: xMeters,
+              y: yMeters,
+              audioBlob: blob,
+              audioUrl: url,
+              durationSeconds: Math.round(durationSeconds),
+            };
+
+            currentRecordingRoute.nodes.push(node);
+            debugLog("[route] Node added", currentRecordingRoute.name, {
+              id: node.id,
+              bytes: blob.size,
+              type: blob.type || "unknown",
+            });
+
+            updateMetricsUI();
+            renderNodesList();
+            drawRoutePreview();
+          } catch (err) {
+            consecutiveFailures += 1;
+            debugLog("[rec] recordOneChunk failed", err?.message || err, {
+              consecutiveFailures,
+              max: CHUNK_MAX_CONSECUTIVE_FAILURES,
+            });
+            if (!isRecording) break;
+            if (consecutiveFailures >= CHUNK_MAX_CONSECUTIVE_FAILURES) {
+              setError(
+                "Audio capture failed repeatedly. Tap End Walk to save the nodes you already have, then start a new walk.",
+              );
+              setStatus("Recording error (audio)");
+              debugLog("[rec] too many chunk failures — stopping sensors & mic");
+              isRecording = false;
+              setTimeout(() => {
+                stopRecordingSession({ keepNodes: true, silent: true }).catch((e) =>
+                  debugLog("[rec] stopRecordingSession after errors", e?.message || e),
+                );
+              }, 0);
+              break;
+            }
+            await sleep(CHUNK_RETRY_BACKOFF_MS);
+          }
         }
-
-        const url = URL.createObjectURL(blob);
-        const node = {
-          id: nodeId++,
-          timestamp,
-          stepCount,
-          heading: headingDeg,
-          x: xMeters,
-          y: yMeters,
-          audioBlob: blob,
-          audioUrl: url,
-          durationSeconds: Math.round(durationSeconds),
-        };
-
-        currentRecordingRoute.nodes.push(node);
-        console.log("[route] Node added to", currentRecordingRoute.name, {
-          ...node,
-          audioBlob: `Blob(${blob.type || "unknown"}, ${blob.size} bytes)`,
-        });
-
-        updateMetricsUI();
-        renderNodesList();
-        drawRoutePreview();
+      } finally {
+        debugLog("[rec] recording loop ended", { isRecording });
       }
     };
 
@@ -1084,9 +1221,9 @@ async function startRecordingSession() {
 
     // Important: audio playback must be user-initiated on iOS. We only render controls;
     // user tapping play is a gesture, so that's OK.
-    console.log("[rec] session started");
+    debugLog("[rec] session started", { chunkMs: CHUNK_MS, route: currentRecordingRoute?.name });
   } catch (err) {
-    console.log("[rec] start failed:", err);
+    debugLog("[rec] start failed:", err?.message || err);
     setError(err?.message || String(err));
     setStatus("Not recording");
     permText.textContent = "Permission or setup failed. Check the error above.";
@@ -1181,16 +1318,18 @@ function startNewWalk() {
 }
 
 async function endWalk() {
-  if (!isRecording) return;
+  if (!currentRecordingRoute) return;
 
-  await stopRecordingSession({ keepNodes: true, silent: false });
-
-  if (currentRecordingRoute) {
-    routes.unshift(currentRecordingRoute);
-    selectedRoute = currentRecordingRoute;
-    console.log("[route] Route saved", currentRecordingRoute.name);
-    currentRecordingRoute = null;
+  if (isRecording) {
+    await stopRecordingSession({ keepNodes: true, silent: false });
   }
+
+  routes.unshift(currentRecordingRoute);
+  selectedRoute = currentRecordingRoute;
+  debugLog("[route] Route saved", currentRecordingRoute.name, {
+    nodes: currentRecordingRoute.nodes.length,
+  });
+  currentRecordingRoute = null;
 
   renderRoutesPanel();
   renderListenRouteOptions();
@@ -1198,6 +1337,7 @@ async function endWalk() {
   renderNodesList();
   drawRoutePreview();
   updateDeleteRouteButton();
+  setButtonsForRecording(false);
 
   // Stop any listening playback when walk ends (keeps things predictable).
   stopListeningPlayback("walk ended");
@@ -1287,5 +1427,5 @@ renderListenRouteOptions();
 setListenToggleUI();
 updateListenMode();
 
-console.log("[init] SoundRoute prototype loaded");
+debugLog("[init] SoundRoute prototype loaded");
 
