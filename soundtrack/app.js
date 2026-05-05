@@ -11,6 +11,10 @@ const CHUNK_MS = CHUNK_SECONDS * 1000;
 const CHUNK_HARD_TIMEOUT_MS = CHUNK_MS + 6000;
 const CHUNK_MAX_CONSECUTIVE_FAILURES = 8;
 const CHUNK_RETRY_BACKOFF_MS = 400;
+// While recording, refresh metrics + map on a timer so heading/live redraw stay smooth;
+// position (x/y) still updates only on detected steps — no extra dead reckoning.
+const RECORDING_UI_TICK_MS = 110;
+const MAX_EMPTY_CHUNKS_BEFORE_FAIL = 3;
 
 // Simple step detection tuning knobs.
 // These are intentionally conservative; step detection on phones varies a lot.
@@ -113,6 +117,8 @@ let lastChunkStartMs = 0;
 let recordingLoopPromise = null;
 let activeChunkStopTimer = null;
 let recordingSessionToken = 0;
+let recordingSessionStarting = false;
+let recordingUiTickTimer = null;
 
 // Listen Mode state
 let listenModeEnabled = false;
@@ -151,6 +157,22 @@ function scheduleRouteRedraw() {
     routeRedrawPending = false;
     drawRoutePreview();
   });
+}
+
+function stopRecordingUiTick() {
+  if (recordingUiTickTimer != null) {
+    clearInterval(recordingUiTickTimer);
+    recordingUiTickTimer = null;
+  }
+}
+
+function startRecordingUiTick() {
+  stopRecordingUiTick();
+  recordingUiTickTimer = window.setInterval(() => {
+    if (!isRecording) return;
+    updateMetricsUI();
+    scheduleRouteRedraw();
+  }, RECORDING_UI_TICK_MS);
 }
 
 // Movement state
@@ -917,6 +939,7 @@ function startSensorTracking() {
     if (Number.isFinite(h)) {
       headingDeg = normalizeHeading(h);
       updateMetricsUI();
+      scheduleRouteRedraw();
       // Debug: current heading (occasionally).
       if (nowLog - lastOrientationLogMs > 1500) {
         console.log("[orientation] headingDeg", headingDeg.toFixed(0));
@@ -978,6 +1001,10 @@ async function startRecordingSession() {
     console.warn("[rec] start ignored; already recording");
     return;
   }
+  if (recordingSessionStarting) {
+    debugLog("[rec] start ignored; session already initializing");
+    return;
+  }
 
   if (!currentRecordingRoute) {
     // Start is routed through "Start New Walk" and should always set a route,
@@ -985,12 +1012,14 @@ async function startRecordingSession() {
     throw new Error("No current route. Tap “Start New Walk” to create a route first.");
   }
 
-  setError("");
-  setStatus("Requesting permissions…");
-  permText.textContent = "Requesting microphone + motion + orientation permissions…";
-  setButtonsForRecording(true);
-
+  recordingSessionStarting = true;
   try {
+    setError("");
+    setStatus("Requesting permissions…");
+    permText.textContent = "Requesting microphone + motion + orientation permissions…";
+    setButtonsForRecording(true);
+
+    try {
     const token = (recordingSessionToken += 1);
 
     // Reset state at the start of each session.
@@ -1030,6 +1059,13 @@ async function startRecordingSession() {
     }
     isCalibrating = false;
 
+    const routeForRecording = currentRecordingRoute;
+    if (!routeForRecording) {
+      throw new Error("Recording route was cleared before capture started.");
+    }
+    debugLog("[rec] capture route locked", { id: routeForRecording.id, name: routeForRecording.name });
+    startRecordingUiTick();
+
     // 5) Start MediaRecorder loop producing *independent* 8-second files.
     //
     // iPhone Safari gotcha:
@@ -1047,7 +1083,7 @@ async function startRecordingSession() {
     // options.mimeType = "audio/webm;codecs=opus";
 
     // Node ids are incremental within a route.
-    let nodeId = currentRecordingRoute.nodes.length + 1;
+    let nodeId = routeForRecording.nodes.length + 1;
 
     const recordOneChunk = () =>
       new Promise((resolve, reject) => {
@@ -1136,6 +1172,13 @@ async function startRecordingSession() {
           try {
             if (rec.state !== "inactive") {
               debugLog("[audio] chunk timer fired → stop()", { state: rec.state });
+              if (typeof rec.requestData === "function") {
+                try {
+                  rec.requestData();
+                } catch (e) {
+                  debugLog("[audio] requestData before stop", e?.message || e);
+                }
+              }
               rec.stop();
             } else {
               debugLog("[audio] chunk timer fired but recorder already inactive");
@@ -1150,16 +1193,31 @@ async function startRecordingSession() {
 
     const recordingLoop = async () => {
       let consecutiveFailures = 0;
+      let consecutiveEmptyChunks = 0;
       try {
         while (isRecording) {
           try {
+            if (routeForRecording !== currentRecordingRoute) {
+              debugLog("[rec] route reference mismatch — stopping loop", {
+                locked: routeForRecording?.id,
+                current: currentRecordingRoute?.id,
+              });
+              break;
+            }
             const { blob, durationSeconds, timestamp } = await recordOneChunk();
             consecutiveFailures = 0;
 
             if (!blob || blob.size === 0) {
-              debugLog("[audio] empty chunk ignored");
+              consecutiveEmptyChunks += 1;
+              debugLog("[audio] empty chunk", { consecutiveEmptyChunks });
+              if (consecutiveEmptyChunks >= MAX_EMPTY_CHUNKS_BEFORE_FAIL) {
+                throw new Error(
+                  "MediaRecorder returned empty audio repeatedly (no bytes). Try End Walk and Start New Walk.",
+                );
+              }
               continue;
             }
+            consecutiveEmptyChunks = 0;
 
             const url = URL.createObjectURL(blob);
             const node = {
@@ -1174,8 +1232,8 @@ async function startRecordingSession() {
               durationSeconds: Math.round(durationSeconds),
             };
 
-            currentRecordingRoute.nodes.push(node);
-            debugLog("[route] Node added", currentRecordingRoute.name, {
+            routeForRecording.nodes.push(node);
+            debugLog("[route] Node added", routeForRecording.name, {
               id: node.id,
               bytes: blob.size,
               type: blob.type || "unknown",
@@ -1221,7 +1279,7 @@ async function startRecordingSession() {
 
     // Important: audio playback must be user-initiated on iOS. We only render controls;
     // user tapping play is a gesture, so that's OK.
-    debugLog("[rec] session started", { chunkMs: CHUNK_MS, route: currentRecordingRoute?.name });
+    debugLog("[rec] session started", { chunkMs: CHUNK_MS, route: routeForRecording?.name });
   } catch (err) {
     debugLog("[rec] start failed:", err?.message || err);
     setError(err?.message || String(err));
@@ -1231,10 +1289,14 @@ async function startRecordingSession() {
     // Clean up any partial state.
     await stopRecordingSession({ keepNodes: true, silent: true });
     setButtonsForRecording(false);
+    }
+  } finally {
+    recordingSessionStarting = false;
   }
 }
 
 async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, silent: false }) {
+  stopRecordingUiTick();
   if (!isRecording && !mediaRecorder && !mediaStream) {
     if (!silent) console.warn("[rec] stop ignored; nothing to stop");
     return;
