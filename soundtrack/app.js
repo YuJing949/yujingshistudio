@@ -51,7 +51,6 @@ const routesEmpty = document.getElementById("routesEmpty");
 
 // Listen Mode UI
 const listenToggleBtn = document.getElementById("listenToggleBtn");
-const listenRouteSelect = document.getElementById("listenRouteSelect");
 const listenWarn = document.getElementById("listenWarn");
 const listenToText = document.getElementById("listenToText");
 const nearestNodeText = document.getElementById("nearestNodeText");
@@ -116,9 +115,9 @@ let recordingSessionToken = 0;
 
 // Listen Mode state
 let listenModeEnabled = false;
-let listeningSourceRouteId = "";
+let currentlyPlayingRouteId = null;
 let currentlyPlayingNodeId = null;
-let listenNearest = { nodeId: null, distance: Infinity };
+let listenNearest = { routeId: null, nodeId: null, distance: Infinity };
 let lastDirectionUpdateMs = 0;
 let currentAudio = null;
 let currentRouteDirectionDeg = NaN;
@@ -136,6 +135,7 @@ listenAudio.addEventListener("ended", () => {
   }
   currentRouteDirectionDeg = NaN;
   currentAudio = null;
+  currentlyPlayingRouteId = null;
   currentlyPlayingNodeId = null;
   // Immediately re-evaluate based on current heading + position.
   lastDirectionUpdateMs = 0;
@@ -345,13 +345,19 @@ function drawRoutePreview() {
   // Include the current live position while recording so the route updates even between nodes.
   if (isRecording) ptsPrimary.push({ x: xMeters, y: yMeters, id: -1, kind: "live" });
 
-  // Secondary route (Listen Mode source) while recording.
-  const sourceRoute = listenModeEnabled ? getRouteById(listeningSourceRouteId) : null;
-  const nodesSecondary = isRecording && sourceRoute ? sourceRoute.nodes : [];
-  const ptsSecondary = nodesSecondary.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "secondary" }));
+  // All saved historical routes (faint) while recording + Listen Mode — not currentRecordingRoute.
+  const drawHistoricalListen = isRecording && listenModeEnabled && routes.length > 0;
+  const ptsHistorical = [];
+  if (drawHistoricalListen) {
+    for (const r of routes) {
+      for (const n of r.nodes) {
+        ptsHistorical.push({ x: n.x, y: n.y, id: n.id, kind: "secondary" });
+      }
+    }
+  }
 
   // Combine for bounds fitting.
-  const ptsAll = ptsPrimary.concat(ptsSecondary);
+  const ptsAll = ptsPrimary.concat(ptsHistorical);
 
   // Fit points to canvas with padding.
   let minX = Infinity,
@@ -406,10 +412,15 @@ function drawRoutePreview() {
     routeCtx.restore();
   }
 
-  // Draw secondary (listen source) first, lighter.
-  if (nodesSecondary.length > 0) {
-    const ptsS = [{ x: 0, y: 0, id: 0, kind: "origin2" }].concat(ptsSecondary);
-    strokePath(ptsS, { strokeStyle: "rgba(255,255,255,0.22)", lineWidth: 2 });
+  // Historical routes (each polyline from origin) under the live walk.
+  if (drawHistoricalListen) {
+    for (const r of routes) {
+      if (!r.nodes.length) continue;
+      const ptsH = [{ x: 0, y: 0, id: 0, kind: "origin2" }].concat(
+        r.nodes.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "secondary" })),
+      );
+      strokePath(ptsH, { strokeStyle: "rgba(255,255,255,0.2)", lineWidth: 2 });
+    }
   }
 
   // Draw primary (current route) on top.
@@ -430,8 +441,9 @@ function drawRoutePreview() {
   routeCtx.restore();
 
   // Highlight nearest listening node (only during recording + listen mode).
-  if (isRecording && sourceRoute && listenNearest.nodeId != null) {
-    const n = sourceRoute.nodes.find((x) => x.id === listenNearest.nodeId);
+  if (isRecording && listenModeEnabled && listenNearest.routeId != null && listenNearest.nodeId != null) {
+    const hr = getRouteById(listenNearest.routeId);
+    const n = hr?.nodes.find((x) => x.id === listenNearest.nodeId);
     if (n) {
       const { cx, cy } = toCanvas({ x: n.x, y: n.y });
       routeCtx.save();
@@ -545,54 +557,28 @@ function updateDeleteRouteButton() {
   deleteRouteBtn.disabled = isRecording || !selectedRoute;
 }
 
+function getListenSourceRoutes() {
+  return routes.filter((r) => r.nodes && r.nodes.length > 0);
+}
+
 function renderListenRouteOptions() {
-  // Only saved routes can be listening sources.
-  const hasRoutes = routes.length > 0;
-  listenRouteSelect.disabled = !hasRoutes || isRecording; // keep stable during recording
-  listenToggleBtn.disabled = !hasRoutes;
-
-  const prev = listeningSourceRouteId;
-  listenRouteSelect.innerHTML = "";
-
-  if (!hasRoutes) {
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = "Record a route first…";
-    listenRouteSelect.appendChild(opt);
-    listeningSourceRouteId = "";
-    return;
-  }
-
-  const opt0 = document.createElement("option");
-  opt0.value = "";
-  opt0.textContent = "Select a route…";
-  listenRouteSelect.appendChild(opt0);
-
-  for (const r of routes) {
-    const opt = document.createElement("option");
-    opt.value = r.id;
-    opt.textContent = `${r.name} (${r.nodes.length} nodes)`;
-    listenRouteSelect.appendChild(opt);
-  }
-
-  // Restore previous selection if still present.
-  if (prev && getRouteById(prev)) {
-    listeningSourceRouteId = prev;
-    listenRouteSelect.value = prev;
-  } else {
-    listeningSourceRouteId = "";
-    listenRouteSelect.value = "";
-  }
+  const hasListenSources = getListenSourceRoutes().length > 0;
+  listenToggleBtn.disabled = !hasListenSources;
 }
 
 function setListenToggleUI() {
   listenToggleBtn.textContent = listenModeEnabled ? "Disable Listen Mode" : "Enable Listen Mode";
-  listenToText.textContent = listeningSourceRouteId ? getRouteById(listeningSourceRouteId)?.name || "—" : "—";
+  listenToText.textContent = listenModeEnabled ? "All previous routes" : "—";
 }
 
 function stopListeningPlayback(reason) {
   if (currentlyPlayingNodeId != null) {
-    console.log("[listen] Stopping node", currentlyPlayingNodeId, reason ? `(${reason})` : "");
+    console.log(
+      "[listen] Stopping playback",
+      currentlyPlayingRouteId,
+      currentlyPlayingNodeId,
+      reason ? `(${reason})` : "",
+    );
   }
   try {
     currentAudio?.pause();
@@ -606,6 +592,7 @@ function stopListeningPlayback(reason) {
   }
   currentRouteDirectionDeg = NaN;
   currentAudio = null;
+  currentlyPlayingRouteId = null;
   currentlyPlayingNodeId = null;
   playbackText.textContent = "No nearby sound";
 }
@@ -703,9 +690,9 @@ function startVolumeTracking() {
 
     // Optional UI: show angle + volume.
     // Keep it short to avoid UI jitter: only update playbackText.
-    playbackText.textContent = `Playing Node ${currentlyPlayingNodeId} (Angle ${angleDiff.toFixed(0)}° / v=${v.toFixed(
-      2
-    )})`;
+    const playingRoute = currentlyPlayingRouteId ? getRouteById(currentlyPlayingRouteId) : null;
+    const playingLabel = playingRoute ? `${playingRoute.name} · Node ${currentlyPlayingNodeId}` : `Node ${currentlyPlayingNodeId}`;
+    playbackText.textContent = `${playingLabel} (Angle ${angleDiff.toFixed(0)}° / v=${v.toFixed(2)})`;
 
     const now = performance.now();
     if (now - lastVolumeLogMs > 1200) {
@@ -718,21 +705,29 @@ function startVolumeTracking() {
   }, VOLUME_UPDATE_INTERVAL_MS);
 }
 
-function findDirectionalNearestNode(currentX, currentY, heading, sourceRoute) {
+function findDirectionalNearestNodeAcrossRoutes(currentX, currentY, heading, sourceRoutes) {
   const candidates = [];
-  for (const n of sourceRoute.nodes) {
-    const distance = getDistanceToNode(n, currentX, currentY);
-    if (!(distance <= MAX_LISTEN_DISTANCE)) continue;
+  for (const sourceRoute of sourceRoutes) {
+    if (!sourceRoute?.nodes?.length) continue;
+    for (const n of sourceRoute.nodes) {
+      const distance = getDistanceToNode(n, currentX, currentY);
+      if (!(distance <= MAX_LISTEN_DISTANCE)) continue;
 
-    const bearing = getBearingToNode(currentX, currentY, n);
-    const angleDiff = getAngleDifference(heading, bearing);
-    if (angleDiff > DIRECTION_CONE_DEGREES) continue;
+      const bearing = getBearingToNode(currentX, currentY, n);
+      const angleDiff = getAngleDifference(heading, bearing);
+      if (angleDiff > DIRECTION_CONE_DEGREES) continue;
 
-    candidates.push({ node: n, distance, bearing, angleDiff });
+      candidates.push({ node: n, route: sourceRoute, distance, bearing, angleDiff });
+    }
   }
 
-  candidates.sort((a, b) => a.distance - b.distance);
-  console.log("[listen] Candidate nodes:", candidates.length);
+  candidates.sort((a, b) => {
+    if (a.distance !== b.distance) return a.distance - b.distance;
+    const rid = String(a.route.id).localeCompare(String(b.route.id));
+    if (rid !== 0) return rid;
+    return a.node.id - b.node.id;
+  });
+  console.log("[listen] Candidate nodes (all routes):", candidates.length);
 
   return candidates[0] || null;
 }
@@ -746,7 +741,7 @@ function updateListenModeThrottled() {
 function updateListenMode(currentX, currentY, heading) {
   if (!listenModeEnabled) {
     setListenWarn("");
-    listenNearest = { nodeId: null, distance: Infinity };
+    listenNearest = { routeId: null, nodeId: null, distance: Infinity };
     nearestNodeText.textContent = "—";
     distanceText.textContent = "—";
     playbackText.textContent = "No nearby sound";
@@ -754,19 +749,11 @@ function updateListenMode(currentX, currentY, heading) {
     return;
   }
 
-  const sourceRoute = getRouteById(listeningSourceRouteId);
-  if (!sourceRoute) {
-    setListenWarn("Select a listening route first.");
-    stopListeningPlayback("no source route");
-    listenNearest = { nodeId: null, distance: Infinity };
-    setListenToggleUI();
-    scheduleRouteRedraw();
-    return;
-  }
-  if (!sourceRoute.nodes || sourceRoute.nodes.length === 0) {
-    setListenWarn("Selected route has no nodes.");
-    stopListeningPlayback("source has no nodes");
-    listenNearest = { nodeId: null, distance: Infinity };
+  const sourceRoutes = getListenSourceRoutes();
+  if (sourceRoutes.length === 0) {
+    setListenWarn("Save at least one route with audio nodes to use Listen Mode.");
+    stopListeningPlayback("no listen sources");
+    listenNearest = { routeId: null, nodeId: null, distance: Infinity };
     setListenToggleUI();
     scheduleRouteRedraw();
     return;
@@ -778,8 +765,10 @@ function updateListenMode(currentX, currentY, heading) {
   // Listen Mode is intended for a new walk: only autoplay while recording.
   if (!isRecording) {
     playbackText.textContent = "Listen Mode enabled";
-    // Do not autoplay when not recording.
     stopListeningPlayback("not recording");
+    listenNearest = { routeId: null, nodeId: null, distance: Infinity };
+    nearestNodeText.textContent = "—";
+    distanceText.textContent = "—";
     scheduleRouteRedraw();
     return;
   }
@@ -789,7 +778,7 @@ function updateListenMode(currentX, currentY, heading) {
     playbackText.textContent = "Waiting for heading…";
     nearestNodeText.textContent = "—";
     distanceText.textContent = "—";
-    listenNearest = { nodeId: null, distance: Infinity };
+    listenNearest = { routeId: null, nodeId: null, distance: Infinity };
     scheduleRouteRedraw();
     console.log("[listen] Waiting for heading…");
     return;
@@ -798,9 +787,12 @@ function updateListenMode(currentX, currentY, heading) {
   console.log("[listen] Heading:", heading.toFixed(0));
 
   // If audio is currently playing, do NOT interrupt.
-  if (currentAudio && !currentAudio.paused && currentlyPlayingNodeId != null) {
+  if (currentAudio && !currentAudio.paused && currentlyPlayingNodeId != null && currentlyPlayingRouteId != null) {
     console.log("[listen] Audio playing, not interrupting");
-    playbackText.textContent = `Playing Node ${currentlyPlayingNodeId}`;
+    const playingRoute = getRouteById(currentlyPlayingRouteId);
+    playbackText.textContent = playingRoute
+      ? `Playing ${playingRoute.name} · Node ${currentlyPlayingNodeId}`
+      : `Playing Node ${currentlyPlayingNodeId}`;
     scheduleRouteRedraw();
     return;
   }
@@ -815,27 +807,38 @@ function updateListenMode(currentX, currentY, heading) {
   }
   lastDirectionUpdateMs = now;
 
-  const best = findDirectionalNearestNode(currentX, currentY, heading, sourceRoute);
+  const best = findDirectionalNearestNodeAcrossRoutes(currentX, currentY, heading, sourceRoutes);
   if (!best) {
     nearestNodeText.textContent = "—";
     distanceText.textContent = "—";
     playbackText.textContent = "No node in front";
-    listenNearest = { nodeId: null, distance: Infinity };
+    listenNearest = { routeId: null, nodeId: null, distance: Infinity };
     console.log("[listen] No node in front");
     scheduleRouteRedraw();
     return;
   }
 
-  const { node, distance, bearing, angleDiff } = best;
-  listenNearest = { nodeId: node.id, distance };
-  nearestNodeText.textContent = `Node ${node.id}`;
+  const { node, route: ownerRoute, distance, bearing, angleDiff } = best;
+  listenNearest = { routeId: ownerRoute.id, nodeId: node.id, distance };
+  nearestNodeText.textContent = `${ownerRoute.name} · Node ${node.id}`;
   distanceText.textContent = `${distance.toFixed(1)}m / ${angleDiff.toFixed(0)}°`;
-  console.log("[listen] Selected directional node:", `Node ${node.id}`, "distance", distance.toFixed(2), "angleDiff", angleDiff.toFixed(1), "bearing", bearing.toFixed(0));
+  console.log(
+    "[listen] Selected directional node:",
+    ownerRoute.name,
+    `Node ${node.id}`,
+    "distance",
+    distance.toFixed(2),
+    "angleDiff",
+    angleDiff.toFixed(1),
+    "bearing",
+    bearing.toFixed(0),
+  );
 
   // Play it (no interruption logic; this only runs when we're not already playing).
+  currentlyPlayingRouteId = ownerRoute.id;
   currentlyPlayingNodeId = node.id;
-  playbackText.textContent = `Playing Node ${node.id}`;
-  currentRouteDirectionDeg = getRouteDirectionForNode(sourceRoute, node);
+  playbackText.textContent = `Playing ${ownerRoute.name} · Node ${node.id}`;
+  currentRouteDirectionDeg = getRouteDirectionForNode(ownerRoute, node);
   if (Number.isFinite(currentRouteDirectionDeg)) {
     console.log("[listen] Route direction:", currentRouteDirectionDeg.toFixed(0));
   }
@@ -1001,7 +1004,7 @@ function resetSessionState() {
   lastMotionLogMs = 0;
   lastOrientationLogMs = 0;
   isCalibrating = false;
-  listenNearest = { nodeId: null, distance: Infinity };
+  listenNearest = { routeId: null, nodeId: null, distance: Infinity };
   lastDirectionUpdateMs = 0;
 
   updateMetricsUI();
@@ -1415,24 +1418,32 @@ function deleteSelectedRoute() {
     }
   }
 
-  routes = routes.filter((r) => r.id !== selectedRoute.id);
+  const deletedRouteId = selectedRoute.id;
+  routes = routes.filter((r) => r.id !== deletedRouteId);
   console.log("[route] deleted", selectedRoute.name);
   selectedRoute = routes[0] || null;
 
   renderRoutesPanel();
-  renderListenRouteOptions();
   updateMetricsUI();
   renderNodesList();
   drawRoutePreview();
   updateDeleteRouteButton();
 
-  // If the listening source was deleted, disable listening.
-  if (listeningSourceRouteId && !getRouteById(listeningSourceRouteId)) {
-    listeningSourceRouteId = "";
+  if (listenModeEnabled && currentlyPlayingRouteId === deletedRouteId) {
+    stopListeningPlayback("playing route deleted");
+  }
+  if (listenModeEnabled && listenNearest.routeId === deletedRouteId) {
+    listenNearest = { routeId: null, nodeId: null, distance: Infinity };
+  }
+  if (listenModeEnabled && getListenSourceRoutes().length === 0) {
     listenModeEnabled = false;
-    stopListeningPlayback("source deleted");
+    stopListeningPlayback("no listenable routes left");
     setListenToggleUI();
-    renderListenRouteOptions();
+  }
+  renderListenRouteOptions();
+  if (listenModeEnabled) {
+    lastDirectionUpdateMs = 0;
+    updateListenMode(xMeters, yMeters, headingDeg);
   }
 }
 
@@ -1449,14 +1460,6 @@ endBtn.addEventListener("click", () => {
 
 deleteRouteBtn.addEventListener("click", () => {
   deleteSelectedRoute();
-});
-
-listenRouteSelect.addEventListener("change", () => {
-  listeningSourceRouteId = listenRouteSelect.value;
-  const r = getRouteById(listeningSourceRouteId);
-  console.log("[listen] Listening source route selected:", r?.name || "none");
-  setListenToggleUI();
-  updateListenMode();
 });
 
 listenToggleBtn.addEventListener("click", async () => {
