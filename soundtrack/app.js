@@ -1044,6 +1044,15 @@ async function startRecordingSession() {
         rec.addEventListener("dataavailable", (ev) => {
           if (ev.data && ev.data.size > 0) {
             chunks.push(ev.data);
+            console.log("[audio] dataavailable", snapshot.id, ev.data.size, ev.data.type || "");
+          } else {
+            console.log("[audio] dataavailable (empty)", snapshot.id);
+          }
+
+          // Safari can sometimes deliver the final data *without* a reliable "stop" event.
+          // If the recorder is already inactive, finalize immediately.
+          if (rec.state === "inactive") {
+            finalizeChunk();
           }
         });
 
@@ -1059,7 +1068,8 @@ async function startRecordingSession() {
 
         rec.addEventListener("stop", () => {
           console.log("[audio] chunk stopped", snapshot.id);
-          finalizeChunk();
+          // Give a tiny window for any final dataavailable to arrive, then finalize.
+          setTimeout(finalizeChunk, 50);
         });
 
         rec.start();
@@ -1072,7 +1082,15 @@ async function startRecordingSession() {
               if (typeof rec.requestData === "function") {
                 rec.requestData();
               }
-              rec.stop();
+              // Some Safari builds need a short delay between requestData() and stop().
+              setTimeout(() => {
+                try {
+                  if (rec.state === "recording") rec.stop();
+                  else finalizeChunk();
+                } catch (e) {
+                  reject(e);
+                }
+              }, 75);
             } else {
               finalizeChunk();
             }
