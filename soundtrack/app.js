@@ -265,7 +265,7 @@ function drawRoutePreview() {
   if (isRecording) {
     ptsPrimary.push({ x: xMeters, y: yMeters, id: -1, kind: "live" });
   }
-  
+
   // Secondary route (Listen Mode source) while recording.
   const sourceRoute = listenModeEnabled ? getRouteById(listeningSourceRouteId) : null;
   const nodesSecondary = isRecording && sourceRoute ? sourceRoute.nodes : [];
@@ -1101,38 +1101,55 @@ async function startRecordingSession() {
       });
 
     const recordingLoop = async () => {
-      while (isRecording && token === recordingSessionToken) {
-        const { blob, durationSeconds, nodeSnapshot } = await recordOneChunk();
+      try {
+        while (isRecording && token === recordingSessionToken) {
+          let chunkResult;
+          try {
+            chunkResult = await recordOneChunk();
+          } catch (e) {
+            // If chunking fails (Safari can be flaky), stop cleanly so sensors/UI don't hang.
+            console.log("[audio] chunk error", e);
+            setError(`Audio chunk error: ${e?.message || String(e)}`);
+            await stopRecordingSession({ keepNodes: true, silent: false });
+            break;
+          }
 
-        if (token !== recordingSessionToken) {
-          break;
+          const { blob, durationSeconds, nodeSnapshot } = chunkResult;
+
+          if (token !== recordingSessionToken) {
+            break;
+          }
+
+          if (!blob || blob.size === 0) {
+            console.log("[audio] empty chunk ignored");
+            if (!isRecording) break;
+            continue;
+          }
+
+          const url = URL.createObjectURL(blob);
+
+          const node = {
+            ...nodeSnapshot,
+            audioBlob: blob,
+            audioUrl: url,
+            durationSeconds: Math.round(durationSeconds),
+          };
+
+          currentRecordingRoute.nodes.push(node);
+
+          console.log("[route] Node added to", currentRecordingRoute.name, {
+            ...node,
+            audioBlob: `Blob(${blob.type || "unknown"}, ${blob.size} bytes)`,
+          });
+
+          updateMetricsUI();
+          renderNodesList();
+          drawRoutePreview();
         }
-
-        if (!blob || blob.size === 0) {
-          console.log("[audio] empty chunk ignored");
-          if (!isRecording) break;
-          continue;
-        }
-
-        const url = URL.createObjectURL(blob);
-
-        const node = {
-          ...nodeSnapshot,
-          audioBlob: blob,
-          audioUrl: url,
-          durationSeconds: Math.round(durationSeconds),
-        };
-
-        currentRecordingRoute.nodes.push(node);
-
-        console.log("[route] Node added to", currentRecordingRoute.name, {
-          ...node,
-          audioBlob: `Blob(${blob.type || "unknown"}, ${blob.size} bytes)`,
-        });
-
-        updateMetricsUI();
-        renderNodesList();
-        drawRoutePreview();
+      } catch (e) {
+        // Catch-all: never allow the async loop to die silently.
+        console.log("[audio] recordingLoop crashed", e);
+        setError(`Recording loop crashed: ${e?.message || String(e)}`);
       }
     };
 
@@ -1331,7 +1348,8 @@ listenRouteSelect.addEventListener("change", () => {
   const r = getRouteById(listeningSourceRouteId);
   console.log("[listen] Listening source route selected:", r?.name || "none");
   setListenToggleUI();
-  updateListenMode();
+  lastDirectionUpdateMs = 0;
+  updateListenMode(xMeters, yMeters, headingDeg);
 });
 
 listenToggleBtn.addEventListener("click", async () => {
@@ -1359,7 +1377,7 @@ renderRoutesPanel();
 updateDeleteRouteButton();
 renderListenRouteOptions();
 setListenToggleUI();
-updateListenMode();
+updateListenMode(xMeters, yMeters, headingDeg);
 
 console.log("[init] SoundRoute prototype loaded");
 
