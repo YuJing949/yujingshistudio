@@ -76,6 +76,9 @@ let lastChunkStartMs = 0;
 let recordingLoopPromise = null;
 let activeChunkStopTimer = null;
 let recordingSessionToken = 0;
+let activeChunkResolve = null;
+let activeChunkReject = null;
+let activeChunkFinalized = false;
 
 // Listen Mode state
 let listenModeEnabled = false;
@@ -259,8 +262,10 @@ function drawRoutePreview() {
   // Always include origin even if there are no nodes.
   ptsPrimary.unshift({ x: 0, y: 0, id: 0, kind: "origin" });
   // Include the current live position while recording so the route updates even between nodes.
-  if (isRecording) ptsPrimary.push({ x: xMeters, y: yMeters, id: -1, kind: "live" });
-
+  if (isRecording) {
+    ptsPrimary.push({ x: xMeters, y: yMeters, id: -1, kind: "live" });
+  }
+  
   // Secondary route (Listen Mode source) while recording.
   const sourceRoute = listenModeEnabled ? getRouteById(listeningSourceRouteId) : null;
   const nodesSecondary = isRecording && sourceRoute ? sourceRoute.nodes : [];
@@ -941,8 +946,6 @@ async function startRecordingSession() {
   }
 
   if (!currentRecordingRoute) {
-    // Start is routed through "Start New Walk" and should always set a route,
-    // but guard anyway to prevent mixing nodes.
     throw new Error("No current route. Tap “Start New Walk” to create a route first.");
   }
 
@@ -954,60 +957,38 @@ async function startRecordingSession() {
   try {
     const token = (recordingSessionToken += 1);
 
-    // Reset state at the start of each session.
     resetSessionState();
     setStatus("Starting…");
 
-    // IMPORTANT (iPhone Safari):
-    // Motion/Orientation permission prompts MUST be triggered directly by a user gesture.
-    // If we await something else first (like getUserMedia), iOS may treat the gesture as "lost"
-    // and throw: "requesting device motion access requires a user gesture to prompt".
-    //
-    // So we request motion/orientation FIRST, then microphone.
-
-    // 1) Motion/Orientation permissions (iOS 13+ requires requestPermission()).
     await requestMotionPermissionIfNeeded();
     await requestOrientationPermissionIfNeeded();
     permText.textContent = formatPermStatus(["Motion OK", "Orientation OK"]);
 
-    // 2) Microphone permission (also must be from user tap).
     console.log("[perm] Requesting microphone permission via getUserMedia…");
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     console.log("[perm] Microphone granted.");
     permText.textContent = formatPermStatus(["Microphone OK", "Motion OK", "Orientation OK"]);
 
-    // 3) Start tracking sensors.
-    isRecording = true;
-    isCalibrating = true;
-    startSensorTracking();
-
-    // 4) Calibration phase (2–3 seconds) to stabilize heading + motion smoothing baseline.
-    setStatus("Calibrating sensors…");
-    console.log("[sensors] Calibrating sensors…");
-    await sleep(2500);
-    if (!isRecording || token !== recordingSessionToken) {
-      // Walk ended or a new session started while we were waiting.
-      return;
-    }
-    isCalibrating = false;
-
-    // 5) Start MediaRecorder loop producing *independent* 8-second files.
-    //
-    // iPhone Safari gotcha:
-    // Using `mediaRecorder.start(timeslice)` can emit "fragment" blobs after the first one,
-    // which often won't play back as standalone audio files.
-    // So we STOP and RESTART recording every 8 seconds, building a self-contained Blob per node.
     if (!window.MediaRecorder) {
       throw new Error("MediaRecorder is not supported in this browser.");
     }
 
-    const options = {};
-    // Safari support varies; letting it pick tends to be most compatible.
-    // You can experiment with explicit types later:
-    // options.mimeType = "audio/mp4";
-    // options.mimeType = "audio/webm;codecs=opus";
+    isRecording = true;
+    isCalibrating = true;
+    startSensorTracking();
 
-    // Node ids are incremental within a route.
+    setStatus("Calibrating sensors…");
+    console.log("[sensors] Calibrating sensors…");
+
+    await sleep(2500);
+
+    if (!isRecording || token !== recordingSessionToken) {
+      return;
+    }
+
+    isCalibrating = false;
+
+    const options = {};
     let nodeId = currentRecordingRoute.nodes.length + 1;
 
     const recordOneChunk = () =>
@@ -1015,28 +996,86 @@ async function startRecordingSession() {
         const chunkStart = Date.now();
         const chunks = [];
 
-        // Create a fresh MediaRecorder each chunk to maximize Safari compatibility.
+        activeChunkResolve = resolve;
+        activeChunkReject = reject;
+        activeChunkFinalized = false;
+
+        const snapshot = {
+          id: nodeId++,
+          timestamp: chunkStart,
+          stepCount,
+          heading: Number.isFinite(headingDeg) ? headingDeg : NaN,
+          x: xMeters,
+          y: yMeters,
+        };
+
         const rec = new MediaRecorder(mediaStream, options);
         mediaRecorder = rec;
         lastChunkStartMs = chunkStart;
 
-        rec.addEventListener("dataavailable", (ev) => {
-          if (ev.data && ev.data.size > 0) chunks.push(ev.data);
-        });
-        rec.addEventListener("error", (e) => reject(e));
-        rec.addEventListener("start", () => console.log("[audio] chunk started"));
-        rec.addEventListener("stop", () => {
-          console.log("[audio] chunk stopped");
-          const blob = new Blob(chunks, { type: chunks[0]?.type || rec.mimeType || "" });
+        const finalizeChunk = () => {
+          if (activeChunkFinalized) return;
+          activeChunkFinalized = true;
+
+          if (activeChunkStopTimer) {
+            clearTimeout(activeChunkStopTimer);
+            activeChunkStopTimer = null;
+          }
+
+          const blob = new Blob(chunks, {
+            type: chunks[0]?.type || rec.mimeType || "",
+          });
+
           const durationSeconds = Math.max(0.1, (Date.now() - chunkStart) / 1000);
-          resolve({ blob, durationSeconds, timestamp: Date.now() });
+
+          activeChunkResolve = null;
+          activeChunkReject = null;
+
+          resolve({
+            blob,
+            durationSeconds,
+            nodeSnapshot: {
+              ...snapshot,
+              timestamp: Date.now(),
+            },
+          });
+        };
+
+        rec.addEventListener("dataavailable", (ev) => {
+          if (ev.data && ev.data.size > 0) {
+            chunks.push(ev.data);
+          }
         });
 
-        rec.start(); // no timeslice; we stop manually
+        rec.addEventListener("error", (e) => {
+          activeChunkResolve = null;
+          activeChunkReject = null;
+          reject(e);
+        });
+
+        rec.addEventListener("start", () => {
+          console.log("[audio] chunk started", snapshot.id);
+        });
+
+        rec.addEventListener("stop", () => {
+          console.log("[audio] chunk stopped", snapshot.id);
+          finalizeChunk();
+        });
+
+        rec.start();
+
         activeChunkStopTimer = window.setTimeout(() => {
           activeChunkStopTimer = null;
+
           try {
-            if (rec.state !== "inactive") rec.stop();
+            if (rec.state === "recording") {
+              if (typeof rec.requestData === "function") {
+                rec.requestData();
+              }
+              rec.stop();
+            } else {
+              finalizeChunk();
+            }
           } catch (e) {
             reject(e);
           }
@@ -1044,27 +1083,30 @@ async function startRecordingSession() {
       });
 
     const recordingLoop = async () => {
-      while (isRecording) {
-        const { blob, durationSeconds, timestamp } = await recordOneChunk();
+      while (isRecording && token === recordingSessionToken) {
+        const { blob, durationSeconds, nodeSnapshot } = await recordOneChunk();
+
+        if (token !== recordingSessionToken) {
+          break;
+        }
+
         if (!blob || blob.size === 0) {
           console.log("[audio] empty chunk ignored");
+          if (!isRecording) break;
           continue;
         }
 
         const url = URL.createObjectURL(blob);
+
         const node = {
-          id: nodeId++,
-          timestamp,
-          stepCount,
-          heading: headingDeg,
-          x: xMeters,
-          y: yMeters,
+          ...nodeSnapshot,
           audioBlob: blob,
           audioUrl: url,
           durationSeconds: Math.round(durationSeconds),
         };
 
         currentRecordingRoute.nodes.push(node);
+
         console.log("[route] Node added to", currentRecordingRoute.name, {
           ...node,
           audioBlob: `Blob(${blob.type || "unknown"}, ${blob.size} bytes)`,
@@ -1082,8 +1124,6 @@ async function startRecordingSession() {
     permText.textContent = formatPermStatus(["Microphone OK", "Motion listening", "Orientation listening"]);
     updateMetricsUI();
 
-    // Important: audio playback must be user-initiated on iOS. We only render controls;
-    // user tapping play is a gesture, so that's OK.
     console.log("[rec] session started");
   } catch (err) {
     console.log("[rec] start failed:", err);
@@ -1091,7 +1131,6 @@ async function startRecordingSession() {
     setStatus("Not recording");
     permText.textContent = "Permission or setup failed. Check the error above.";
 
-    // Clean up any partial state.
     await stopRecordingSession({ keepNodes: true, silent: true });
     setButtonsForRecording(false);
   }
@@ -1104,11 +1143,13 @@ async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, s
   }
 
   console.log("[rec] stopping…");
+
   isRecording = false;
   isCalibrating = false;
+  recordingSessionToken += 1;
+
   stopSensorTracking();
 
-  // Stop current chunk timer + recorder (may emit a final dataavailable).
   try {
     if (activeChunkStopTimer) {
       clearTimeout(activeChunkStopTimer);
@@ -1119,26 +1160,38 @@ async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, s
   }
 
   try {
-    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      if (typeof mediaRecorder.requestData === "function") {
+        mediaRecorder.requestData();
+      }
       mediaRecorder.stop();
+    } else if (activeChunkResolve && !activeChunkFinalized) {
+      activeChunkResolve({
+        blob: null,
+        durationSeconds: 0,
+        nodeSnapshot: null,
+      });
     }
   } catch (e) {
     console.log("[rec] recorder stop error", e);
+    if (activeChunkReject) activeChunkReject(e);
   }
 
-  // Wait for the loop to finish cleanly (so the last chunk can be saved).
   try {
-    if (recordingLoopPromise) await recordingLoopPromise;
+    if (recordingLoopPromise) {
+      await recordingLoopPromise;
+    }
   } catch (e) {
     console.log("[rec] loop await error", e);
   } finally {
     recordingLoopPromise = null;
   }
 
-  // Stop mic tracks.
   try {
     if (mediaStream) {
-      for (const t of mediaStream.getTracks()) t.stop();
+      for (const t of mediaStream.getTracks()) {
+        t.stop();
+      }
     }
   } catch (e) {
     console.log("[rec] stream stop error", e);
@@ -1146,6 +1199,9 @@ async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, s
 
   mediaRecorder = null;
   mediaStream = null;
+  activeChunkResolve = null;
+  activeChunkReject = null;
+  activeChunkFinalized = false;
 
   setButtonsForRecording(false);
   if (!silent) setStatus("Recording stopped");
