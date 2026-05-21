@@ -18,6 +18,7 @@ const STEP_COOLDOWN_MS = 380; // avoid double-counting
 const PEAK_THRESHOLD = 1.15; // magnitude delta threshold after filtering (approx)
 const SMOOTHING_ALPHA = 0.85; // exponential smoothing for magnitude
 const FLAT_PHONE_TILT_DEGREES = 35;
+const HEADING_SENSOR_WARNING_MS = 5000;
 
 // Listen Mode tuning
 const DIRECTION_CONE_DEGREES = 45;
@@ -169,9 +170,16 @@ let lastMagDelta = 0;
 let lastMotionLogMs = 0;
 let lastOrientationLogMs = 0;
 
+// Orientation diagnostics for older iOS/Safari devices.
+let orientationEventCount = 0;
+let headingSampleCount = 0;
+let headingWarningTimer = null;
+let headingWarningMessage = "";
+
 // Event handler references (so we can remove them cleanly)
 let onMotion = null;
 let onOrientation = null;
+let onCompassCalibration = null;
 
 function makeId() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
@@ -275,6 +283,53 @@ function getHeadingFromOrientationEvent(ev) {
 
   if (Number.isFinite(webkitHeading)) return normalizeHeading(webkitHeading);
   return getCompassHeadingFromAlpha(alpha);
+}
+
+function getHeadingSensorHelpMessage() {
+  if (orientationEventCount === 0) {
+    return [
+      "No compass/orientation events yet.",
+      "On older iPhones (for example iPhone 6 / iOS 12), open Settings > Safari > Motion & Orientation Access, turn it on, then reload this page.",
+      "If it is already on, open the Compass app or move the phone in a figure-8 to calibrate, then start a new walk.",
+    ].join(" ");
+  }
+
+  return [
+    "Orientation events are arriving, but no usable heading value was found.",
+    "On older iPhones, enable Settings > Safari > Motion & Orientation Access, calibrate Compass, then reload this page.",
+  ].join(" ");
+}
+
+function clearHeadingSensorWarning({ clearUi = true } = {}) {
+  if (headingWarningTimer) {
+    clearTimeout(headingWarningTimer);
+    headingWarningTimer = null;
+  }
+  if (clearUi && headingWarningMessage && errorBox.textContent === headingWarningMessage) {
+    setError("");
+  }
+  headingWarningMessage = "";
+}
+
+function showHeadingSensorWarning(message) {
+  headingWarningMessage = message;
+  setError(message);
+}
+
+function scheduleHeadingSensorWarning() {
+  clearHeadingSensorWarning({ clearUi: false });
+  headingWarningTimer = window.setTimeout(() => {
+    headingWarningTimer = null;
+    if (!isRecording || Number.isFinite(headingDeg)) return;
+
+    const message = getHeadingSensorHelpMessage();
+    showHeadingSensorWarning(message);
+    debugLog("[orientation] heading unavailable", {
+      orientationEventCount,
+      headingSampleCount,
+      userAgent: navigator.userAgent,
+    });
+  }, HEADING_SENSOR_WARNING_MS);
 }
 
 function updatePositionForStep() {
@@ -919,6 +974,9 @@ function startSensorTracking() {
   }
 
   console.log("[sensors] Adding motion + orientation listeners");
+  orientationEventCount = 0;
+  headingSampleCount = 0;
+  scheduleHeadingSensorWarning();
 
   // Motion: detect steps from acceleration magnitude changes.
   onMotion = (ev) => {
@@ -978,6 +1036,7 @@ function startSensorTracking() {
   // posture, use alpha/yaw so the route still follows the phone's top edge.
   onOrientation = (ev) => {
     if (!isRecording) return;
+    orientationEventCount += 1;
 
     // Debug: orientation event received (throttled).
     const nowLog = performance.now();
@@ -997,7 +1056,9 @@ function startSensorTracking() {
 
     const h = getHeadingFromOrientationEvent(ev);
     if (Number.isFinite(h)) {
+      headingSampleCount += 1;
       headingDeg = h;
+      clearHeadingSensorWarning();
       updateMetricsUI();
       // Debug: current heading (occasionally).
       if (nowLog - lastOrientationLogMs > 1500) {
@@ -1006,12 +1067,25 @@ function startSensorTracking() {
     }
   };
 
+  onCompassCalibration = (ev) => {
+    try {
+      ev.preventDefault();
+    } catch {
+      // ignore
+    }
+    const message = "Compass needs calibration. Move the phone in a figure-8, or open the Compass app, then start a new walk.";
+    showHeadingSensorWarning(message);
+    debugLog("[orientation] compass calibration requested");
+  };
+
   window.addEventListener("devicemotion", onMotion, { passive: true });
   window.addEventListener("deviceorientation", onOrientation, { passive: true });
   window.addEventListener("deviceorientationabsolute", onOrientation, { passive: true });
+  window.addEventListener("compassneedscalibration", onCompassCalibration);
 }
 
 function stopSensorTracking() {
+  clearHeadingSensorWarning({ clearUi: false });
   if (onMotion) {
     window.removeEventListener("devicemotion", onMotion);
     console.log("[sensors] Removed devicemotion listener");
@@ -1021,8 +1095,13 @@ function stopSensorTracking() {
     window.removeEventListener("deviceorientationabsolute", onOrientation);
     console.log("[sensors] Removed deviceorientation listener");
   }
+  if (onCompassCalibration) {
+    window.removeEventListener("compassneedscalibration", onCompassCalibration);
+    console.log("[sensors] Removed compass calibration listener");
+  }
   onMotion = null;
   onOrientation = null;
+  onCompassCalibration = null;
 }
 
 function resetSessionState() {
@@ -1037,6 +1116,9 @@ function resetSessionState() {
   lastMagDelta = 0;
   lastMotionLogMs = 0;
   lastOrientationLogMs = 0;
+  orientationEventCount = 0;
+  headingSampleCount = 0;
+  clearHeadingSensorWarning({ clearUi: false });
   isCalibrating = false;
   listenNearest = { routeId: null, nodeId: null, distance: Infinity };
   lastDirectionUpdateMs = 0;
