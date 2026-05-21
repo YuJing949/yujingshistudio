@@ -17,6 +17,7 @@ const CHUNK_RETRY_BACKOFF_MS = 400;
 const STEP_COOLDOWN_MS = 380; // avoid double-counting
 const PEAK_THRESHOLD = 1.15; // magnitude delta threshold after filtering (approx)
 const SMOOTHING_ALPHA = 0.85; // exponential smoothing for magnitude
+const FLAT_PHONE_TILT_DEGREES = 35;
 
 // Listen Mode tuning
 const DIRECTION_CONE_DEGREES = 45;
@@ -241,6 +242,39 @@ function normalizeHeading(deg) {
   // Normalize into [0, 360)
   const n = ((deg % 360) + 360) % 360;
   return n;
+}
+
+function getFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : NaN;
+}
+
+function isPhoneFlatScreenUp(beta, gamma) {
+  if (!Number.isFinite(beta) || !Number.isFinite(gamma)) return false;
+  return Math.abs(beta) <= FLAT_PHONE_TILT_DEGREES && Math.abs(gamma) <= FLAT_PHONE_TILT_DEGREES;
+}
+
+function getCompassHeadingFromAlpha(alpha) {
+  if (!Number.isFinite(alpha)) return NaN;
+  // Browsers report alpha counter-clockwise from north; app heading is clockwise.
+  return normalizeHeading(360 - alpha);
+}
+
+function getHeadingFromOrientationEvent(ev) {
+  const webkitHeading = getFiniteNumber(ev.webkitCompassHeading);
+  const alpha = getFiniteNumber(ev.alpha);
+  const beta = getFiniteNumber(ev.beta);
+  const gamma = getFiniteNumber(ev.gamma);
+
+  // iOS can keep webkitCompassHeading at 0 when the phone is lying screen-up.
+  // In that posture, alpha is the yaw around the vertical axis, which gives the
+  // heading of the phone's top edge for flat walking use.
+  if (isPhoneFlatScreenUp(beta, gamma)) {
+    const alphaHeading = getCompassHeadingFromAlpha(alpha);
+    if (Number.isFinite(alphaHeading)) return alphaHeading;
+  }
+
+  if (Number.isFinite(webkitHeading)) return normalizeHeading(webkitHeading);
+  return getCompassHeadingFromAlpha(alpha);
 }
 
 function updatePositionForStep() {
@@ -939,33 +973,31 @@ function startSensorTracking() {
   };
 
   // Orientation: estimate compass heading.
-  // iOS Safari provides `webkitCompassHeading` (0..360, where 0 is North).
-  // If not available, fall back to `alpha` (device orientation), which may not be true compass.
+  // iOS Safari provides `webkitCompassHeading` (0..360, where 0 is North), but
+  // some devices report a stuck 0 when the phone lies screen-up. For that flat
+  // posture, use alpha/yaw so the route still follows the phone's top edge.
   onOrientation = (ev) => {
     if (!isRecording) return;
-    let h = NaN;
 
     // Debug: orientation event received (throttled).
     const nowLog = performance.now();
     if (nowLog - lastOrientationLogMs > 900) {
       lastOrientationLogMs = nowLog;
       console.log("[orientation] event", {
+        type: ev.type,
         webkitCompassHeading: typeof ev.webkitCompassHeading === "number" ? ev.webkitCompassHeading : null,
         alpha: typeof ev.alpha === "number" ? ev.alpha : null,
+        beta: typeof ev.beta === "number" ? ev.beta : null,
+        gamma: typeof ev.gamma === "number" ? ev.gamma : null,
+        absolute: ev.absolute === true,
+        flatScreenUp: isPhoneFlatScreenUp(getFiniteNumber(ev.beta), getFiniteNumber(ev.gamma)),
         calibrating: isCalibrating,
       });
     }
 
-    if (typeof ev.webkitCompassHeading === "number") {
-      h = ev.webkitCompassHeading;
-    } else if (typeof ev.alpha === "number") {
-      // Note: This fallback often differs by device/OS and can drift.
-      // We still normalize and show it as "heading" for prototype purposes.
-      h = 360 - ev.alpha;
-    }
-
+    const h = getHeadingFromOrientationEvent(ev);
     if (Number.isFinite(h)) {
-      headingDeg = normalizeHeading(h);
+      headingDeg = h;
       updateMetricsUI();
       // Debug: current heading (occasionally).
       if (nowLog - lastOrientationLogMs > 1500) {
@@ -976,6 +1008,7 @@ function startSensorTracking() {
 
   window.addEventListener("devicemotion", onMotion, { passive: true });
   window.addEventListener("deviceorientation", onOrientation, { passive: true });
+  window.addEventListener("deviceorientationabsolute", onOrientation, { passive: true });
 }
 
 function stopSensorTracking() {
@@ -985,6 +1018,7 @@ function stopSensorTracking() {
   }
   if (onOrientation) {
     window.removeEventListener("deviceorientation", onOrientation);
+    window.removeEventListener("deviceorientationabsolute", onOrientation);
     console.log("[sensors] Removed deviceorientation listener");
   }
   onMotion = null;
