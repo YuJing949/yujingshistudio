@@ -71,6 +71,10 @@ const nodesList = document.getElementById("nodesList");
 const nodesEmpty = document.getElementById("nodesEmpty");
 const routeCanvas = document.getElementById("routeCanvas");
 const routeCtx = routeCanvas.getContext("2d");
+const downloadAllAudioBtn = document.getElementById("downloadAllAudioBtn");
+const downloadRoutesList = document.getElementById("downloadRoutesList");
+const downloadsEmpty = document.getElementById("downloadsEmpty");
+const downloadStatus = document.getElementById("downloadStatus");
 
 const debugLogPre = document.getElementById("debugLogPre");
 const debugClearBtn = document.getElementById("debugClearBtn");
@@ -638,6 +642,230 @@ function renderRoutesPanel() {
     btn.appendChild(sub);
     li.appendChild(btn);
     routesList.appendChild(li);
+  }
+}
+
+
+function sanitizeFilenamePart(value) {
+  return String(value || "route")
+    .trim()
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60)
+    .toLowerCase() || "route";
+}
+
+function triggerDownload(url, filename) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function getNodeAudioExtension(node) {
+  const type = node.audioBlob?.type || "";
+  if (type.includes("mp4") || type.includes("aac")) return "m4a";
+  if (type.includes("mpeg")) return "mp3";
+  if (type.includes("wav")) return "wav";
+  if (type.includes("ogg")) return "ogg";
+  if (type.includes("webm")) return "webm";
+  return "m4a";
+}
+
+function getSavedAudioNodes() {
+  const out = [];
+  for (const route of routes) {
+    for (const node of route.nodes || []) {
+      if (node.audioUrl) out.push({ route, node });
+    }
+  }
+  return out;
+}
+
+function drawRouteDownloadImage(route, canvasSize = 900) {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasSize;
+  canvas.height = canvasSize;
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.fillStyle = "#0b0b0c";
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.lineWidth = 1;
+  const gridStep = 75;
+  for (let gx = 0; gx <= w; gx += gridStep) {
+    ctx.beginPath();
+    ctx.moveTo(gx, 0);
+    ctx.lineTo(gx, h);
+    ctx.stroke();
+  }
+  for (let gy = 0; gy <= h; gy += gridStep) {
+    ctx.beginPath();
+    ctx.moveTo(0, gy);
+    ctx.lineTo(w, gy);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.fillStyle = "#f3f3f6";
+  ctx.font = "bold 34px system-ui, -apple-system, sans-serif";
+  ctx.fillText(`${route.name} estimated route`, 42, 58);
+  ctx.fillStyle = "#b8b8c3";
+  ctx.font = "22px system-ui, -apple-system, sans-serif";
+  ctx.fillText(`${route.nodes.length} nodes · ${new Date(route.createdAt).toLocaleString()}`, 42, 92);
+
+  const pts = [{ x: 0, y: 0, id: 0, kind: "origin" }].concat(
+    route.nodes.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "node" })),
+  );
+
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity;
+  for (const pt of pts) {
+    minX = Math.min(minX, pt.x);
+    maxX = Math.max(maxX, pt.x);
+    minY = Math.min(minY, pt.y);
+    maxY = Math.max(maxY, pt.y);
+  }
+  if (maxX - minX < 1) {
+    const midX = (minX + maxX) / 2;
+    minX = midX - 0.5;
+    maxX = midX + 0.5;
+  }
+  if (maxY - minY < 1) {
+    const midY = (minY + maxY) / 2;
+    minY = midY - 0.5;
+    maxY = midY + 0.5;
+  }
+  const pad = 84;
+  const topPad = 130;
+  const spanX = Math.max(1e-6, maxX - minX);
+  const spanY = Math.max(1e-6, maxY - minY);
+  const scale = Math.min((w - pad * 2) / spanX, (h - topPad - pad) / spanY);
+
+  function toCanvas(pt) {
+    const cx = pad + (pt.x - minX) * scale;
+    const cy = h - pad - (pt.y - minY) * scale;
+    return { cx, cy };
+  }
+
+  const origin = toCanvas({ x: 0, y: 0 });
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, origin.cy);
+  ctx.lineTo(w, origin.cy);
+  ctx.moveTo(origin.cx, topPad);
+  ctx.lineTo(origin.cx, h);
+  ctx.stroke();
+  ctx.restore();
+
+  if (pts.length > 1) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(10,132,255,0.95)";
+    ctx.lineWidth = 7;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    pts.forEach((pt, idx) => {
+      const { cx, cy } = toCanvas(pt);
+      if (idx === 0) ctx.moveTo(cx, cy);
+      else ctx.lineTo(cx, cy);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  const markers = spreadCoincidentNodeMarkersForDisplay(pts);
+  for (const pt of markers) {
+    const { cx, cy } = toCanvas(pt);
+    const isOrigin = pt.id === 0;
+    ctx.fillStyle = isOrigin ? "rgba(52,199,89,0.95)" : "rgba(255,255,255,0.95)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, isOrigin ? 12 : 9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  return canvas;
+}
+
+async function downloadRouteImage(route) {
+  const canvas = drawRouteDownloadImage(route);
+  const filename = `${sanitizeFilenamePart(route.name)}-estimated-route.png`;
+  const dataUrl = canvas.toDataURL("image/png");
+  triggerDownload(dataUrl, filename);
+  downloadStatus.textContent = `Started download: ${filename}`;
+  debugLog("[download] route image", route.name, filename);
+}
+
+async function downloadAllNodeAudio() {
+  const audioNodes = getSavedAudioNodes();
+  if (audioNodes.length === 0) {
+    downloadStatus.textContent = "No node audio to download yet.";
+    return;
+  }
+
+  downloadStatus.textContent = `Starting ${audioNodes.length} audio downloads…`;
+  debugLog("[download] all node audio", { count: audioNodes.length });
+
+  for (let i = 0; i < audioNodes.length; i += 1) {
+    const { route, node } = audioNodes[i];
+    const ext = getNodeAudioExtension(node);
+    const filename = `${sanitizeFilenamePart(route.name)}-node-${String(node.id).padStart(2, "0")}.${ext}`;
+    triggerDownload(node.audioUrl, filename);
+    // Give mobile Safari a moment between automatic downloads.
+    await sleep(250);
+  }
+
+  downloadStatus.textContent = `Started ${audioNodes.length} audio downloads.`;
+}
+
+function renderDownloadsPanel() {
+  downloadRoutesList.innerHTML = "";
+  downloadsEmpty.hidden = routes.length !== 0;
+
+  const audioNodes = getSavedAudioNodes();
+  downloadAllAudioBtn.disabled = audioNodes.length === 0;
+
+  for (const route of routes) {
+    const li = document.createElement("li");
+    li.className = "download-route";
+
+    const top = document.createElement("div");
+    top.className = "download-route-top";
+
+    const copy = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "download-route-title";
+    title.textContent = route.name;
+    const sub = document.createElement("div");
+    sub.className = "download-route-sub";
+    sub.textContent = `${route.nodes.length} nodes · PNG route map`;
+    copy.appendChild(title);
+    copy.appendChild(sub);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-ghost";
+    btn.textContent = "Download PNG";
+    btn.addEventListener("click", () => {
+      downloadRouteImage(route);
+    });
+
+    top.appendChild(copy);
+    top.appendChild(btn);
+    li.appendChild(top);
+    downloadRoutesList.appendChild(li);
   }
 }
 
@@ -1511,6 +1739,7 @@ async function endWalk() {
 
   renderRoutesPanel();
   renderListenRouteOptions();
+  renderDownloadsPanel();
   updateMetricsUI();
   renderNodesList();
   drawRoutePreview();
@@ -1540,6 +1769,7 @@ function deleteSelectedRoute() {
   selectedRoute = routes[0] || null;
 
   renderRoutesPanel();
+  renderDownloadsPanel();
   updateMetricsUI();
   renderNodesList();
   drawRoutePreview();
@@ -1594,6 +1824,10 @@ listenToggleBtn.addEventListener("click", async () => {
   updateListenMode(xMeters, yMeters, headingDeg);
 });
 
+downloadAllAudioBtn.addEventListener("click", () => {
+  downloadAllNodeAudio();
+});
+
 // Initial UI
 setButtonsForRecording(false);
 setStatus("Not recording");
@@ -1602,6 +1836,7 @@ drawRoutePreview();
 renderRoutesPanel();
 updateDeleteRouteButton();
 renderListenRouteOptions();
+renderDownloadsPanel();
 setListenToggleUI();
 updateListenMode();
 

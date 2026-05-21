@@ -128,6 +128,21 @@
         <pre id="debugLogPre" class="debug-log" aria-live="polite"></pre>
       </details>
 
+      <section class="downloads" aria-label="Downloads">
+        <div class="downloads-top">
+          <h2>Downloads</h2>
+          <button id="downloadAllAudioBtn" class="btn btn-ghost" type="button" disabled>
+            Download all node audio
+          </button>
+        </div>
+        <p class="hint">
+          Downloads are available for routes and audio nodes recorded in this browser session.
+        </p>
+        <div id="downloadsEmpty" class="empty">No saved routes to download yet.</div>
+        <ol id="downloadRoutesList" class="download-routes-list"></ol>
+        <div id="downloadStatus" class="download-status" aria-live="polite"></div>
+      </section>
+
       <footer class="footer">
         <p class="footnote">
           Tip: keep the phone in a consistent orientation while walking for better heading.
