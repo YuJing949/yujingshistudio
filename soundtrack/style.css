@@ -433,3 +433,69 @@ body {
   color: #c8c8d4;
 }
 
+.downloads {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  margin: 16px 0 12px;
+}
+
+.downloads-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0 10px;
+}
+
+.downloads-top h2 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.2px;
+}
+
+.download-routes-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.download-route {
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.download-route-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.download-route-title {
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.download-route-sub {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.download-route .btn-ghost {
+  flex: 0 0 auto;
+  min-height: 40px;
+}
+
+.download-status {
+  min-height: 18px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+

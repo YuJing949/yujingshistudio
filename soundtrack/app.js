@@ -17,6 +17,8 @@ const CHUNK_RETRY_BACKOFF_MS = 400;
 const STEP_COOLDOWN_MS = 380; // avoid double-counting
 const PEAK_THRESHOLD = 1.15; // magnitude delta threshold after filtering (approx)
 const SMOOTHING_ALPHA = 0.85; // exponential smoothing for magnitude
+const FLAT_PHONE_TILT_DEGREES = 35;
+const HEADING_SENSOR_WARNING_MS = 5000;
 
 // Listen Mode tuning
 const DIRECTION_CONE_DEGREES = 45;
@@ -69,6 +71,10 @@ const nodesList = document.getElementById("nodesList");
 const nodesEmpty = document.getElementById("nodesEmpty");
 const routeCanvas = document.getElementById("routeCanvas");
 const routeCtx = routeCanvas.getContext("2d");
+const downloadAllAudioBtn = document.getElementById("downloadAllAudioBtn");
+const downloadRoutesList = document.getElementById("downloadRoutesList");
+const downloadsEmpty = document.getElementById("downloadsEmpty");
+const downloadStatus = document.getElementById("downloadStatus");
 
 const debugLogPre = document.getElementById("debugLogPre");
 const debugClearBtn = document.getElementById("debugClearBtn");
@@ -168,9 +174,16 @@ let lastMagDelta = 0;
 let lastMotionLogMs = 0;
 let lastOrientationLogMs = 0;
 
+// Orientation diagnostics for older iOS/Safari devices.
+let orientationEventCount = 0;
+let headingSampleCount = 0;
+let headingWarningTimer = null;
+let headingWarningMessage = "";
+
 // Event handler references (so we can remove them cleanly)
 let onMotion = null;
 let onOrientation = null;
+let onCompassCalibration = null;
 
 function makeId() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
@@ -241,6 +254,86 @@ function normalizeHeading(deg) {
   // Normalize into [0, 360)
   const n = ((deg % 360) + 360) % 360;
   return n;
+}
+
+function getFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : NaN;
+}
+
+function isPhoneFlatScreenUp(beta, gamma) {
+  if (!Number.isFinite(beta) || !Number.isFinite(gamma)) return false;
+  return Math.abs(beta) <= FLAT_PHONE_TILT_DEGREES && Math.abs(gamma) <= FLAT_PHONE_TILT_DEGREES;
+}
+
+function getCompassHeadingFromAlpha(alpha) {
+  if (!Number.isFinite(alpha)) return NaN;
+  // Browsers report alpha counter-clockwise from north; app heading is clockwise.
+  return normalizeHeading(360 - alpha);
+}
+
+function getHeadingFromOrientationEvent(ev) {
+  const webkitHeading = getFiniteNumber(ev.webkitCompassHeading);
+  const alpha = getFiniteNumber(ev.alpha);
+  const beta = getFiniteNumber(ev.beta);
+  const gamma = getFiniteNumber(ev.gamma);
+
+  // iOS can keep webkitCompassHeading at 0 when the phone is lying screen-up.
+  // In that posture, alpha is the yaw around the vertical axis, which gives the
+  // heading of the phone's top edge for flat walking use.
+  if (isPhoneFlatScreenUp(beta, gamma)) {
+    const alphaHeading = getCompassHeadingFromAlpha(alpha);
+    if (Number.isFinite(alphaHeading)) return alphaHeading;
+  }
+
+  if (Number.isFinite(webkitHeading)) return normalizeHeading(webkitHeading);
+  return getCompassHeadingFromAlpha(alpha);
+}
+
+function getHeadingSensorHelpMessage() {
+  if (orientationEventCount === 0) {
+    return [
+      "No compass/orientation events yet.",
+      "On older iPhones (for example iPhone 6 / iOS 12), open Settings > Safari > Motion & Orientation Access, turn it on, then reload this page.",
+      "If it is already on, open the Compass app or move the phone in a figure-8 to calibrate, then start a new walk.",
+    ].join(" ");
+  }
+
+  return [
+    "Orientation events are arriving, but no usable heading value was found.",
+    "On older iPhones, enable Settings > Safari > Motion & Orientation Access, calibrate Compass, then reload this page.",
+  ].join(" ");
+}
+
+function clearHeadingSensorWarning({ clearUi = true } = {}) {
+  if (headingWarningTimer) {
+    clearTimeout(headingWarningTimer);
+    headingWarningTimer = null;
+  }
+  if (clearUi && headingWarningMessage && errorBox.textContent === headingWarningMessage) {
+    setError("");
+  }
+  headingWarningMessage = "";
+}
+
+function showHeadingSensorWarning(message) {
+  headingWarningMessage = message;
+  setError(message);
+}
+
+function scheduleHeadingSensorWarning() {
+  clearHeadingSensorWarning({ clearUi: false });
+  headingWarningTimer = window.setTimeout(() => {
+    headingWarningTimer = null;
+    if (!isRecording || Number.isFinite(headingDeg)) return;
+
+    const message = getHeadingSensorHelpMessage();
+    showHeadingSensorWarning(message);
+    debugLog("[orientation] heading unavailable", {
+      orientationEventCount,
+      headingSampleCount,
+      userAgent: navigator.userAgent,
+    });
+  }, HEADING_SENSOR_WARNING_MS);
 }
 
 function updatePositionForStep() {
@@ -549,6 +642,230 @@ function renderRoutesPanel() {
     btn.appendChild(sub);
     li.appendChild(btn);
     routesList.appendChild(li);
+  }
+}
+
+
+function sanitizeFilenamePart(value) {
+  return String(value || "route")
+    .trim()
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60)
+    .toLowerCase() || "route";
+}
+
+function triggerDownload(url, filename) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function getNodeAudioExtension(node) {
+  const type = node.audioBlob?.type || "";
+  if (type.includes("mp4") || type.includes("aac")) return "m4a";
+  if (type.includes("mpeg")) return "mp3";
+  if (type.includes("wav")) return "wav";
+  if (type.includes("ogg")) return "ogg";
+  if (type.includes("webm")) return "webm";
+  return "m4a";
+}
+
+function getSavedAudioNodes() {
+  const out = [];
+  for (const route of routes) {
+    for (const node of route.nodes || []) {
+      if (node.audioUrl) out.push({ route, node });
+    }
+  }
+  return out;
+}
+
+function drawRouteDownloadImage(route, canvasSize = 900) {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasSize;
+  canvas.height = canvasSize;
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.fillStyle = "#0b0b0c";
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.lineWidth = 1;
+  const gridStep = 75;
+  for (let gx = 0; gx <= w; gx += gridStep) {
+    ctx.beginPath();
+    ctx.moveTo(gx, 0);
+    ctx.lineTo(gx, h);
+    ctx.stroke();
+  }
+  for (let gy = 0; gy <= h; gy += gridStep) {
+    ctx.beginPath();
+    ctx.moveTo(0, gy);
+    ctx.lineTo(w, gy);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.fillStyle = "#f3f3f6";
+  ctx.font = "bold 34px system-ui, -apple-system, sans-serif";
+  ctx.fillText(`${route.name} estimated route`, 42, 58);
+  ctx.fillStyle = "#b8b8c3";
+  ctx.font = "22px system-ui, -apple-system, sans-serif";
+  ctx.fillText(`${route.nodes.length} nodes · ${new Date(route.createdAt).toLocaleString()}`, 42, 92);
+
+  const pts = [{ x: 0, y: 0, id: 0, kind: "origin" }].concat(
+    route.nodes.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "node" })),
+  );
+
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity;
+  for (const pt of pts) {
+    minX = Math.min(minX, pt.x);
+    maxX = Math.max(maxX, pt.x);
+    minY = Math.min(minY, pt.y);
+    maxY = Math.max(maxY, pt.y);
+  }
+  if (maxX - minX < 1) {
+    const midX = (minX + maxX) / 2;
+    minX = midX - 0.5;
+    maxX = midX + 0.5;
+  }
+  if (maxY - minY < 1) {
+    const midY = (minY + maxY) / 2;
+    minY = midY - 0.5;
+    maxY = midY + 0.5;
+  }
+  const pad = 84;
+  const topPad = 130;
+  const spanX = Math.max(1e-6, maxX - minX);
+  const spanY = Math.max(1e-6, maxY - minY);
+  const scale = Math.min((w - pad * 2) / spanX, (h - topPad - pad) / spanY);
+
+  function toCanvas(pt) {
+    const cx = pad + (pt.x - minX) * scale;
+    const cy = h - pad - (pt.y - minY) * scale;
+    return { cx, cy };
+  }
+
+  const origin = toCanvas({ x: 0, y: 0 });
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, origin.cy);
+  ctx.lineTo(w, origin.cy);
+  ctx.moveTo(origin.cx, topPad);
+  ctx.lineTo(origin.cx, h);
+  ctx.stroke();
+  ctx.restore();
+
+  if (pts.length > 1) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(10,132,255,0.95)";
+    ctx.lineWidth = 7;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    pts.forEach((pt, idx) => {
+      const { cx, cy } = toCanvas(pt);
+      if (idx === 0) ctx.moveTo(cx, cy);
+      else ctx.lineTo(cx, cy);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  const markers = spreadCoincidentNodeMarkersForDisplay(pts);
+  for (const pt of markers) {
+    const { cx, cy } = toCanvas(pt);
+    const isOrigin = pt.id === 0;
+    ctx.fillStyle = isOrigin ? "rgba(52,199,89,0.95)" : "rgba(255,255,255,0.95)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, isOrigin ? 12 : 9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  return canvas;
+}
+
+async function downloadRouteImage(route) {
+  const canvas = drawRouteDownloadImage(route);
+  const filename = `${sanitizeFilenamePart(route.name)}-estimated-route.png`;
+  const dataUrl = canvas.toDataURL("image/png");
+  triggerDownload(dataUrl, filename);
+  downloadStatus.textContent = `Started download: ${filename}`;
+  debugLog("[download] route image", route.name, filename);
+}
+
+async function downloadAllNodeAudio() {
+  const audioNodes = getSavedAudioNodes();
+  if (audioNodes.length === 0) {
+    downloadStatus.textContent = "No node audio to download yet.";
+    return;
+  }
+
+  downloadStatus.textContent = `Starting ${audioNodes.length} audio downloads…`;
+  debugLog("[download] all node audio", { count: audioNodes.length });
+
+  for (let i = 0; i < audioNodes.length; i += 1) {
+    const { route, node } = audioNodes[i];
+    const ext = getNodeAudioExtension(node);
+    const filename = `${sanitizeFilenamePart(route.name)}-node-${String(node.id).padStart(2, "0")}.${ext}`;
+    triggerDownload(node.audioUrl, filename);
+    // Give mobile Safari a moment between automatic downloads.
+    await sleep(250);
+  }
+
+  downloadStatus.textContent = `Started ${audioNodes.length} audio downloads.`;
+}
+
+function renderDownloadsPanel() {
+  downloadRoutesList.innerHTML = "";
+  downloadsEmpty.hidden = routes.length !== 0;
+
+  const audioNodes = getSavedAudioNodes();
+  downloadAllAudioBtn.disabled = audioNodes.length === 0;
+
+  for (const route of routes) {
+    const li = document.createElement("li");
+    li.className = "download-route";
+
+    const top = document.createElement("div");
+    top.className = "download-route-top";
+
+    const copy = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "download-route-title";
+    title.textContent = route.name;
+    const sub = document.createElement("div");
+    sub.className = "download-route-sub";
+    sub.textContent = `${route.nodes.length} nodes · PNG route map`;
+    copy.appendChild(title);
+    copy.appendChild(sub);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-ghost";
+    btn.textContent = "Download PNG";
+    btn.addEventListener("click", () => {
+      downloadRouteImage(route);
+    });
+
+    top.appendChild(copy);
+    top.appendChild(btn);
+    li.appendChild(top);
+    downloadRoutesList.appendChild(li);
   }
 }
 
@@ -885,6 +1202,9 @@ function startSensorTracking() {
   }
 
   console.log("[sensors] Adding motion + orientation listeners");
+  orientationEventCount = 0;
+  headingSampleCount = 0;
+  scheduleHeadingSensorWarning();
 
   // Motion: detect steps from acceleration magnitude changes.
   onMotion = (ev) => {
@@ -939,33 +1259,34 @@ function startSensorTracking() {
   };
 
   // Orientation: estimate compass heading.
-  // iOS Safari provides `webkitCompassHeading` (0..360, where 0 is North).
-  // If not available, fall back to `alpha` (device orientation), which may not be true compass.
+  // iOS Safari provides `webkitCompassHeading` (0..360, where 0 is North), but
+  // some devices report a stuck 0 when the phone lies screen-up. For that flat
+  // posture, use alpha/yaw so the route still follows the phone's top edge.
   onOrientation = (ev) => {
     if (!isRecording) return;
-    let h = NaN;
+    orientationEventCount += 1;
 
     // Debug: orientation event received (throttled).
     const nowLog = performance.now();
     if (nowLog - lastOrientationLogMs > 900) {
       lastOrientationLogMs = nowLog;
       console.log("[orientation] event", {
+        type: ev.type,
         webkitCompassHeading: typeof ev.webkitCompassHeading === "number" ? ev.webkitCompassHeading : null,
         alpha: typeof ev.alpha === "number" ? ev.alpha : null,
+        beta: typeof ev.beta === "number" ? ev.beta : null,
+        gamma: typeof ev.gamma === "number" ? ev.gamma : null,
+        absolute: ev.absolute === true,
+        flatScreenUp: isPhoneFlatScreenUp(getFiniteNumber(ev.beta), getFiniteNumber(ev.gamma)),
         calibrating: isCalibrating,
       });
     }
 
-    if (typeof ev.webkitCompassHeading === "number") {
-      h = ev.webkitCompassHeading;
-    } else if (typeof ev.alpha === "number") {
-      // Note: This fallback often differs by device/OS and can drift.
-      // We still normalize and show it as "heading" for prototype purposes.
-      h = 360 - ev.alpha;
-    }
-
+    const h = getHeadingFromOrientationEvent(ev);
     if (Number.isFinite(h)) {
-      headingDeg = normalizeHeading(h);
+      headingSampleCount += 1;
+      headingDeg = h;
+      clearHeadingSensorWarning();
       updateMetricsUI();
       // Debug: current heading (occasionally).
       if (nowLog - lastOrientationLogMs > 1500) {
@@ -974,21 +1295,41 @@ function startSensorTracking() {
     }
   };
 
+  onCompassCalibration = (ev) => {
+    try {
+      ev.preventDefault();
+    } catch {
+      // ignore
+    }
+    const message = "Compass needs calibration. Move the phone in a figure-8, or open the Compass app, then start a new walk.";
+    showHeadingSensorWarning(message);
+    debugLog("[orientation] compass calibration requested");
+  };
+
   window.addEventListener("devicemotion", onMotion, { passive: true });
   window.addEventListener("deviceorientation", onOrientation, { passive: true });
+  window.addEventListener("deviceorientationabsolute", onOrientation, { passive: true });
+  window.addEventListener("compassneedscalibration", onCompassCalibration);
 }
 
 function stopSensorTracking() {
+  clearHeadingSensorWarning({ clearUi: false });
   if (onMotion) {
     window.removeEventListener("devicemotion", onMotion);
     console.log("[sensors] Removed devicemotion listener");
   }
   if (onOrientation) {
     window.removeEventListener("deviceorientation", onOrientation);
+    window.removeEventListener("deviceorientationabsolute", onOrientation);
     console.log("[sensors] Removed deviceorientation listener");
+  }
+  if (onCompassCalibration) {
+    window.removeEventListener("compassneedscalibration", onCompassCalibration);
+    console.log("[sensors] Removed compass calibration listener");
   }
   onMotion = null;
   onOrientation = null;
+  onCompassCalibration = null;
 }
 
 function resetSessionState() {
@@ -1003,6 +1344,9 @@ function resetSessionState() {
   lastMagDelta = 0;
   lastMotionLogMs = 0;
   lastOrientationLogMs = 0;
+  orientationEventCount = 0;
+  headingSampleCount = 0;
+  clearHeadingSensorWarning({ clearUi: false });
   isCalibrating = false;
   listenNearest = { routeId: null, nodeId: null, distance: Infinity };
   lastDirectionUpdateMs = 0;
@@ -1395,6 +1739,7 @@ async function endWalk() {
 
   renderRoutesPanel();
   renderListenRouteOptions();
+  renderDownloadsPanel();
   updateMetricsUI();
   renderNodesList();
   drawRoutePreview();
@@ -1424,6 +1769,7 @@ function deleteSelectedRoute() {
   selectedRoute = routes[0] || null;
 
   renderRoutesPanel();
+  renderDownloadsPanel();
   updateMetricsUI();
   renderNodesList();
   drawRoutePreview();
@@ -1478,6 +1824,10 @@ listenToggleBtn.addEventListener("click", async () => {
   updateListenMode(xMeters, yMeters, headingDeg);
 });
 
+downloadAllAudioBtn.addEventListener("click", () => {
+  downloadAllNodeAudio();
+});
+
 // Initial UI
 setButtonsForRecording(false);
 setStatus("Not recording");
@@ -1486,6 +1836,7 @@ drawRoutePreview();
 renderRoutesPanel();
 updateDeleteRouteButton();
 renderListenRouteOptions();
+renderDownloadsPanel();
 setListenToggleUI();
 updateListenMode();
 
