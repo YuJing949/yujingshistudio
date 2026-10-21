@@ -36,6 +36,7 @@ with sync_playwright() as p:
             pg.evaluate(f"""()=>{{const e=new Event('deviceorientation'); Object.defineProperty(e,'webkitCompassHeading',{{value:{heading}}}); Object.defineProperty(e,'alpha',{{value:0}}); Object.defineProperty(e,'beta',{{value:80}}); Object.defineProperty(e,'gamma',{{value:0}}); window.dispatchEvent(e);}}""")
             pg.wait_for_timeout(1000)
         print('   status during walk:', pg.inner_text('#statusText'), '| points:', pg.inner_text('#nodesCount'))
+        pg.evaluate("window.__lastPlayback = document.getElementById('playbackText').textContent")
         pg.click('#endBtn'); pg.wait_for_timeout(3000)
 
     walk(12)
@@ -50,7 +51,9 @@ with sync_playwright() as p:
     # walk B from same start, listening
     ctx.set_geolocation({'latitude':51.48650,'longitude':-0.12350,'accuracy':8}); pg.wait_for_timeout(500)
     walk(10, listen=True)
-    L=log(pg); print('4 listen lines:', [l[15:] for l in L.split('\n') if '[listen] playing' in l][:3])
+    L=log(pg); lines=[l[15:] for l in L.split('\n') if '[listen]' in l and ('play' in l or 'start' in l or 'switch' in l or 'resync' in l or 'stop' in l)]
+    print('4 listen events:', lines[:6])
+    print('  playback text at end of walk B:', pg.evaluate("window.__lastPlayback || ''"))
 
     # offline walk C
     pg.evaluate("localStorage.setItem('fake-fail-upload','1')")

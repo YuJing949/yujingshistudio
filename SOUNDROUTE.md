@@ -50,6 +50,7 @@
 | `localstore.js` | IndexedDB：上传完成前把旅程存在手机上 |
 | `supabase.js` | Supabase 客户端（publishable key，可以放在前端）、`ensureVisitor()` 匿名登录、`checkDatabase()` |
 | `cloud.js` | `uploadWalk` / `loadMyWalks` / `signAudioUrls` / `deleteWalk` |
+| `listen.js` | 收听：`decideListen()` 纯决策（开始、保持、重新对齐、切换、停止），`ListenPlayer` 双播放器，通过 Web Audio 增益节点控制音量和交叉淡化（iPhone 会忽略 `<audio>.volume`），并预先缓存附近录音；参数在 `LISTEN_CONFIG` |
 | `wrangler.toml` | Cloudflare 静态资源部署（Worker 名 `soundroute`） |
 
 仓库根目录：
@@ -70,7 +71,7 @@
 ```
 - `routes`：我的旅程（云端载入的、本地待上传的、本次录的）。`currentRecordingRoute`：正在录的旅程。
 - `nodes` 就是每 2 秒一个的轨迹点。`x`/`y` 是本次会话坐标系里的米；云端载入的旅程由 `projectWalks()` 从经纬度换算出 x/y。
-- 收听逻辑 `updateListenMode()` → `findDirectionalNearestNodeAcrossRoutes()` 找 20 米内、前方 45° 锥形范围里最近的点 → `playWalkFrom(walk, node.t)` 从对应秒数播放 8 秒，再重新选择（这是阶段 4 之前的过渡做法）。
+- 收听逻辑：`updateListenMode()` 每 300 毫秒调用一次 `decideListen()`。走近旅程（20 米内、大致在前方）就从对应秒数淡入；沿路线走则连续播放；播放进度和所在位置相差超过 12 秒时重新对齐；另一条旅程明显更近（差 8 米以上）时交叉淡化切换；离开 28 米后淡出；播完的旅程休息 45 秒。音量由距离和朝向共同决定。
 
 ### 数据库（Supabase）
 
@@ -102,7 +103,7 @@
 | 1 后端基础 | SQL、接入 Supabase、匿名登录 | 完成，手机实测通过 |
 | 2 定位 | `location.js` 融合 GPS 与步数、指南针；节点存经纬度；面板显示 GPS 精度 | 代码完成；模拟中位误差约 3 米，**未实地测试** |
 | 3 记录与删除 | 连续录音（最长 5 分钟）、2 秒轨迹点、本地先存再上传、刷新后保留、命名、分享码、删除 | 代码完成；模拟环境端到端测试通过，**未在手机上测试** |
-| 4 回放与切换 | 见下 | 未开始 |
+| 4 回放与切换 | 连续播放、淡入淡出、切换、重新对齐、朝向音量、预缓存 | 代码完成；决策单元测试和模拟端到端测试通过，**未在手机上测试** |
 | 5 我的地图 | 见下 | 未开始 |
 | 6 城市广场 | 见下 | 未开始 |
 | 7 打磨 | 见下 | 未开始 |
@@ -115,9 +116,16 @@
 4. 删除旅程，确认 Supabase 的 `routes` 表和 `route-audio` 桶都清空。
 5. 观察 GPS 精度和轨迹形状，必要时调整 `location.js` 的参数（`maxAccuracyM`、`stepVarianceM2`、`timeVarianceM2PerS`）。
 
-### 阶段 4：回放与切换
+### 阶段 4：回放与切换（代码已完成，待手机验证）
 
 验收标准：两台手机分别记录，在任意一台上都能循着另一台的声音走。
+
+已完成下列各项；收藏的旅程要等阶段 5 才会加入收听来源。手机上要重点验证：
+- iPhone 上开着麦克风录音时，播放声音可能从听筒而不是扬声器出来、音量很小，戴耳机测试；
+- Supabase 签名链接的音频走 Web Audio 需要 CORS，正常情况下会先缓存成本地 blob；如果完全没声音，看 Debug log 里的 `[listen] prefetch failed`；
+- 在真实 GPS 下调整 `LISTEN_CONFIG` 的距离参数。
+
+原计划：
 
 - 播放不再按 8 秒一段停下：走近某条旅程后从对应秒数开始，沿着路线走就一直播下去；明显偏离（例如超过 25 米）时淡出。
 - 声音渐入渐出；多条旅程同时在场时，前方最近的那条胜出，切换时交叉淡化。
@@ -160,7 +168,9 @@ pip install playwright && playwright install chromium
 python3 tests/soundroute/run.py
 ```
 
-测试覆盖：录音 → 上传 → 刷新后仍在 → 第二次走同一路线时从对应秒数播放 → 离线上传失败后自动重传 → 删除。
+测试覆盖：录音 → 上传 → 刷新后仍在 → 第二次走同一路线时从对应秒数连续播放 → 离线上传失败后自动重传 → 删除。
+
+收听决策的单元测试：`node tests/soundroute/decide.test.mjs`。
 改了 `cloud.js` 调用的 Supabase API 时，记得同步更新 `fake-supabase.js`。
 
 ## 8. 注意事项
