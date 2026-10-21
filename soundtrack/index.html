@@ -12,7 +12,7 @@
       <header class="header">
         <h1>SoundRoute</h1>
         <p class="subtitle">
-          Mobile prototype: records 8s audio nodes + estimated movement (no GPS).
+          Mobile prototype: records 8s audio nodes + position from GPS, steps and compass.
         </p>
       </header>
 
@@ -74,7 +74,7 @@
         <div class="status-row">
           <div class="status-label">Permissions</div>
           <div id="permText" class="status-value">
-            On iPhone Safari, permissions are requested after tapping Start.
+            On iPhone Safari, permissions (motion, microphone, location) are requested after tapping Start.
           </div>
         </div>
         <div class="status-row">
@@ -109,13 +109,21 @@
           <div class="metric-label">Heading</div>
           <div id="headingVal" class="metric-value">—</div>
         </div>
+        <div class="metric">
+          <div class="metric-label">GPS</div>
+          <div id="gpsText" class="metric-value">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Blended position</div>
+          <div id="latLngText" class="metric-value">—</div>
+        </div>
       </section>
 
       <section class="preview" aria-label="Route preview">
-        <h2>Estimated route (not GPS)</h2>
+        <h2>Estimated route</h2>
         <canvas id="routeCanvas" width="360" height="360"></canvas>
         <p class="hint">
-          This path will drift over time. It’s only a relative estimate from steps + compass.
+          Steps and compass draw the path; GPS keeps pulling it back to where you really are. Before the first GPS fix, the walk starts at the centre.
         </p>
       </section>
 

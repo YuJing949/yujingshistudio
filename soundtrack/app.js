@@ -1,6 +1,8 @@
-// SoundRoute prototype (single-device, in-memory, no GPS).
-// Records short 8-second audio chunks (nodes) and stores estimated movement
-// (step counting + compass heading) at each chunk boundary.
+// SoundRoute prototype (single-device, in-memory).
+// Records short 8-second audio chunks (nodes) and stores the position at each
+// chunk boundary: steps + compass, anchored and corrected by GPS (location.js).
+
+import { LocationFusion } from "./location.js";
 
 /* eslint-disable no-console */
 
@@ -75,6 +77,13 @@ const downloadAllAudioBtn = document.getElementById("downloadAllAudioBtn");
 const downloadRoutesList = document.getElementById("downloadRoutesList");
 const downloadsEmpty = document.getElementById("downloadsEmpty");
 const downloadStatus = document.getElementById("downloadStatus");
+
+const gpsText = document.getElementById("gpsText");
+const latLngText = document.getElementById("latLngText");
+
+// Position: GPS anchored, smoothed by steps + compass. Keeps one local frame
+// (metres, x = east, y = north) for the whole page session.
+const fusion = new LocationFusion();
 
 const debugLogPre = document.getElementById("debugLogPre");
 const debugClearBtn = document.getElementById("debugClearBtn");
@@ -184,6 +193,7 @@ let headingWarningMessage = "";
 let onMotion = null;
 let onOrientation = null;
 let onCompassCalibration = null;
+let lastGpsLogMs = 0;
 
 function makeId() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
@@ -237,6 +247,7 @@ function updateMetricsUI() {
   stepsCount.textContent = String(stepCount);
   posX.textContent = `x=${xMeters.toFixed(2)}`;
   posY.textContent = `y=${yMeters.toFixed(2)}`;
+  updateLocationUI();
   if (Number.isFinite(headingDeg)) {
     headingVal.textContent = `${headingDeg.toFixed(0)}°`;
   } else if (isRecording) {
@@ -244,6 +255,39 @@ function updateMetricsUI() {
   } else {
     headingVal.textContent = "—";
   }
+}
+
+function updateLocationUI() {
+  const fix = fusion.lastFix;
+  if (!fix) {
+    gpsText.textContent = fusion.watchId != null ? "Waiting for GPS…" : "—";
+  } else {
+    gpsText.textContent = `±${Math.round(fix.accuracy)} m${fix.used ? "" : " (too weak, ignored)"}`;
+  }
+  const ll = fusion.toLatLng(xMeters, yMeters);
+  latLngText.textContent = ll
+    ? `${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)} · ±${Math.round(fusion.uncertaintyM)} m`
+    : "Not anchored yet";
+}
+
+// Give every node a latitude/longitude once the frame is anchored to GPS.
+// Nodes recorded before the first fix get theirs as soon as it arrives.
+function fillNodeLatLng() {
+  if (!fusion.hasOrigin) return;
+  const all = [...routes, currentRecordingRoute].filter(Boolean);
+  for (const r of all) {
+    for (const n of r.nodes) {
+      if (Number.isFinite(n.lat)) continue;
+      const ll = fusion.toLatLng(n.x, n.y);
+      n.lat = ll.lat;
+      n.lng = ll.lng;
+    }
+  }
+}
+
+function syncPositionFromFusion() {
+  xMeters = fusion.x;
+  yMeters = fusion.y;
 }
 
 function radians(deg) {
@@ -339,12 +383,10 @@ function scheduleHeadingSensorWarning() {
 function updatePositionForStep() {
   // Only update position if we have a valid heading.
   if (!Number.isFinite(headingDeg)) return;
-  const h = radians(headingDeg);
-  // Spec requirement:
-  // x += stepLength * sin(heading)
-  // y += stepLength * cos(heading)
-  xMeters += STEP_LENGTH_METERS * Math.sin(h);
-  yMeters += STEP_LENGTH_METERS * Math.cos(h);
+  // x += stepLength * sin(heading), y += stepLength * cos(heading),
+  // done inside the fusion so GPS can correct the drift.
+  fusion.onStep(STEP_LENGTH_METERS, headingDeg);
+  syncPositionFromFusion();
   scheduleRouteRedraw();
   updateListenModeThrottled();
 }
@@ -594,6 +636,9 @@ function renderNodesList() {
     grid.appendChild(kv("Heading", Number.isFinite(node.heading) ? `${node.heading.toFixed(0)}°` : "—"));
     grid.appendChild(kv("x", node.x.toFixed(2)));
     grid.appendChild(kv("y", node.y.toFixed(2)));
+    grid.appendChild(
+      kv("Lat, lng", Number.isFinite(node.lat) ? `${node.lat.toFixed(5)}, ${node.lng.toFixed(5)}` : "Waiting for GPS"),
+    );
 
     const audio = document.createElement("audio");
     audio.controls = true;
@@ -1310,6 +1355,42 @@ function startSensorTracking() {
   window.addEventListener("deviceorientation", onOrientation, { passive: true });
   window.addEventListener("deviceorientationabsolute", onOrientation, { passive: true });
   window.addEventListener("compassneedscalibration", onCompassCalibration);
+
+  // GPS: anchors the walk to the real world so it can start anywhere.
+  const hadOrigin = fusion.hasOrigin;
+  fusion.startGps({
+    onFix: (f, pos) => {
+      const firstAnchor = !hadOrigin && f.hasOrigin && f.lastFix?.used;
+      syncPositionFromFusion();
+      if (firstAnchor) {
+        debugLog("[gps] anchored", { lat: f.origin.lat.toFixed(6), lng: f.origin.lng.toFixed(6) });
+      }
+      if (f.hasOrigin) fillNodeLatLng();
+      updateMetricsUI();
+      scheduleRouteRedraw();
+      if (isRecording) updateListenModeThrottled();
+      const now = performance.now();
+      if (now - lastGpsLogMs > 5000) {
+        lastGpsLogMs = now;
+        debugLog("[gps] fix", {
+          accuracy: Math.round(pos.coords.accuracy),
+          used: f.lastFix?.used,
+          blendedUncertainty: Math.round(f.uncertaintyM),
+        });
+      }
+    },
+    onError: (err) => {
+      const denied = err?.code === 1;
+      gpsText.textContent = denied ? "Location permission denied" : "GPS unavailable";
+      debugLog("[gps] error", err?.code, err?.message || err);
+      if (denied) {
+        showHeadingSensorWarning(
+          "Location is off for this site, so walks fall back to steps + compass only (start each walk from the same point). To turn it on: iPhone Settings → Privacy & Security → Location Services → Safari Websites → While Using.",
+        );
+      }
+    },
+  });
+  updateLocationUI();
 }
 
 function stopSensorTracking() {
@@ -1330,14 +1411,17 @@ function stopSensorTracking() {
   onMotion = null;
   onOrientation = null;
   onCompassCalibration = null;
+  fusion.stopGps();
 }
 
 function resetSessionState() {
   // Movement + step detection MUST reset fully on every new walk.
   stepCount = 0;
   headingDeg = NaN;
-  xMeters = 0;
-  yMeters = 0;
+  // Once anchored to GPS, a new walk starts wherever you are; before that,
+  // it starts at (0, 0) like the original same-start-point prototype.
+  fusion.beginWalk();
+  syncPositionFromFusion();
 
   lastStepMs = 0;
   smoothedMag = 0;
@@ -1562,6 +1646,7 @@ async function startRecordingSession() {
             }
 
             const url = URL.createObjectURL(blob);
+            const nodeLatLng = fusion.toLatLng(xMeters, yMeters);
             const node = {
               id: nodeId++,
               timestamp,
@@ -1569,6 +1654,9 @@ async function startRecordingSession() {
               heading: headingDeg,
               x: xMeters,
               y: yMeters,
+              lat: nodeLatLng ? nodeLatLng.lat : null,
+              lng: nodeLatLng ? nodeLatLng.lng : null,
+              uncertaintyM: fusion.hasOrigin ? fusion.uncertaintyM : null,
               audioBlob: blob,
               audioUrl: url,
               durationSeconds: Math.round(durationSeconds),
