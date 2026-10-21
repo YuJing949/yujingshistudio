@@ -12,18 +12,18 @@
       <header class="header">
         <h1>SoundRoute</h1>
         <p class="subtitle">
-          Mobile prototype: records 8s audio nodes + position from GPS, steps and compass.
+          Walk through sound: record up to 5 minutes, hear the walks left before you.
         </p>
       </header>
 
       <section class="routes" aria-label="Routes">
         <div class="routes-top">
-          <h2>Routes</h2>
+          <h2>My walks</h2>
           <button id="deleteRouteBtn" class="btn btn-ghost" type="button" disabled>
-            Delete route
+            Delete walk
           </button>
         </div>
-        <div id="routesEmpty" class="empty">No routes recorded yet.</div>
+        <div id="routesEmpty" class="empty">No walks yet.</div>
         <ol id="routesList" class="routes-list"></ol>
       </section>
 
@@ -90,7 +90,7 @@
 
       <section class="metrics" aria-label="Live metrics">
         <div class="metric">
-          <div class="metric-label">Nodes recorded</div>
+          <div class="metric-label">Track points</div>
           <div id="nodesCount" class="metric-value">0</div>
         </div>
         <div class="metric">
@@ -127,9 +127,9 @@
         </p>
       </section>
 
-      <section class="nodes" aria-label="Recorded nodes">
-        <h2>Recorded nodes</h2>
-        <div id="nodesEmpty" class="empty">No nodes yet.</div>
+      <section class="nodes" aria-label="Walk">
+        <h2>Walk</h2>
+        <div id="nodesEmpty" class="empty">No walk selected.</div>
         <ol id="nodesList" class="nodes-list"></ol>
       </section>
 
@@ -148,11 +148,11 @@
         <div class="downloads-top">
           <h2>Downloads</h2>
           <button id="downloadAllAudioBtn" class="btn btn-ghost" type="button" disabled>
-            Download all node audio
+            Download all walk audio
           </button>
         </div>
         <p class="hint">
-          Downloads are available for routes and audio nodes recorded in this browser session.
+          Downloads cover your walks: the route as a picture and the full recording.
         </p>
         <div id="downloadsEmpty" class="empty">No saved routes to download yet.</div>
         <ol id="downloadRoutesList" class="download-routes-list"></ol>

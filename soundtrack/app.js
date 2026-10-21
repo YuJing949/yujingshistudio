@@ -1,18 +1,22 @@
-// SoundRoute prototype (single-device, in-memory).
-// Records short 8-second audio chunks (nodes) and stores the position at each
-// chunk boundary: steps + compass, anchored and corrected by GPS (location.js).
+// SoundRoute prototype.
+// Records one continuous audio file per walk (max 5 minutes) and a track point
+// ("node") every 2 seconds: position from steps + compass, anchored and
+// corrected by GPS (location.js), plus the second of audio it matches.
+// Walks are kept on the device first, then uploaded to Supabase (cloud.js).
 
 import { LocationFusion } from "./location.js";
+import { savePendingWalk, listPendingWalks, deletePendingWalk } from "./localstore.js";
 
 /* eslint-disable no-console */
 
 const STEP_LENGTH_METERS = 0.7;
-const CHUNK_SECONDS = 8;
-const CHUNK_MS = CHUNK_SECONDS * 1000;
-// If Safari never fires `stop` after `rec.stop()`, unblock the recording loop.
-const CHUNK_HARD_TIMEOUT_MS = CHUNK_MS + 6000;
-const CHUNK_MAX_CONSECUTIVE_FAILURES = 8;
-const CHUNK_RETRY_BACKOFF_MS = 400;
+
+// Recording: one continuous audio file per walk + a track point every 2 s.
+const MAX_WALK_SECONDS = 5 * 60;
+const POINT_INTERVAL_MS = 2000;
+const AUDIO_BITS_PER_SECOND = 32000;
+// If Safari never fires `stop` after `rec.stop()`, don't wait forever.
+const RECORDER_STOP_TIMEOUT_MS = 6000;
 
 // Simple step detection tuning knobs.
 // These are intentionally conservative; step detection on phones varies a lot.
@@ -25,7 +29,9 @@ const HEADING_SENSOR_WARNING_MS = 5000;
 // Listen Mode tuning
 const DIRECTION_CONE_DEGREES = 45;
 const DIRECTION_UPDATE_INTERVAL_MS = 2000;
-const MAX_LISTEN_DISTANCE = 8;
+const MAX_LISTEN_DISTANCE = 20;
+// Until phase 4: play this many seconds from the matching moment, then re-check.
+const LISTEN_SEGMENT_SECONDS = 8;
 const VOLUME_UPDATE_INTERVAL_MS = 150;
 const MIN_LISTEN_VOLUME = 0.2;
 
@@ -127,6 +133,11 @@ let lastChunkStartMs = 0;
 let recordingLoopPromise = null;
 let activeChunkStopTimer = null;
 let recordingSessionToken = 0;
+let trackPointTimer = null;
+let recordingClockTimer = null;
+let walkLimitTimer = null;
+let endingWalk = false;
+let listenSegmentTimer = null;
 
 // Listen Mode state
 let listenModeEnabled = false;
@@ -142,8 +153,18 @@ let lastVolumeLogMs = 0;
 const listenAudio = new Audio();
 listenAudio.preload = "none";
 currentAudio = listenAudio;
-listenAudio.addEventListener("ended", () => {
-  console.log("[listen] Audio ended, recalculating");
+listenAudio.addEventListener("ended", () => finishListenSegment("audio ended"));
+
+// A stretch of someone's walk finished playing: pick what to play next.
+function finishListenSegment(reason) {
+  console.log(`[listen] ${reason}, recalculating`);
+  clearTimeout(listenSegmentTimer);
+  listenSegmentTimer = null;
+  try {
+    listenAudio.pause();
+  } catch {
+    // ignore
+  }
   if (volumeUpdateTimer) {
     clearInterval(volumeUpdateTimer);
     volumeUpdateTimer = null;
@@ -155,7 +176,7 @@ listenAudio.addEventListener("ended", () => {
   // Immediately re-evaluate based on current heading + position.
   lastDirectionUpdateMs = 0;
   updateListenMode(xMeters, yMeters, headingDeg);
-});
+}
 
 // Route redraw throttling (avoid redrawing on every motion event)
 let routeRedrawPending = false;
@@ -288,6 +309,61 @@ function fillNodeLatLng() {
 function syncPositionFromFusion() {
   xMeters = fusion.x;
   yMeters = fusion.y;
+}
+
+// Walks loaded from the cloud only have latitude/longitude. Give their points
+// x/y in this session's frame (or, before GPS anchors it, in a display-only
+// frame) so drawing and listening can use them like walks recorded here.
+let displayFrame = null;
+function projectWalks() {
+  for (const r of routes) {
+    for (const n of r.nodes) {
+      if (!Number.isFinite(n.lat) || !Number.isFinite(n.lng)) continue;
+      let p = fusion.hasOrigin ? fusion.toLocal(n.lat, n.lng) : null;
+      if (!p) {
+        if (!displayFrame) {
+          displayFrame = new LocationFusion();
+          displayFrame.origin = { lat: n.lat, lng: n.lng };
+        }
+        p = displayFrame.toLocal(n.lat, n.lng);
+      }
+      n.x = p.x;
+      n.y = p.y;
+    }
+  }
+}
+
+function recordTrackPoint(walk) {
+  if (!walk?.recordStartMs) return;
+  const now = Date.now();
+  const ll = fusion.toLatLng(xMeters, yMeters);
+  walk.nodes.push({
+    id: walk.nodes.length + 1,
+    t: Math.min(MAX_WALK_SECONDS, (now - walk.recordStartMs) / 1000),
+    timestamp: now,
+    stepCount,
+    heading: headingDeg,
+    x: xMeters,
+    y: yMeters,
+    lat: ll ? ll.lat : null,
+    lng: ll ? ll.lng : null,
+    uncertaintyM: fusion.hasOrigin ? fusion.uncertaintyM : null,
+  });
+  updateMetricsUI();
+  scheduleRouteRedraw();
+}
+
+function formatClock(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function updateRecordingClock() {
+  const walk = currentRecordingRoute;
+  if (!isRecording || !walk?.recordStartMs) return;
+  const elapsed = (Date.now() - walk.recordStartMs) / 1000;
+  const left = MAX_WALK_SECONDS - elapsed;
+  setStatus(`Recording ${formatClock(elapsed)} / ${formatClock(MAX_WALK_SECONDS)}${left <= 30 ? " · ending soon" : ""}`);
 }
 
 function radians(deg) {
@@ -475,8 +551,9 @@ function drawRoutePreview() {
   // Primary route points (what we're viewing: recording route while recording, otherwise selectedRoute)
   const nodesPrimary = getViewingNodes();
   const ptsPrimary = nodesPrimary.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "primary" }));
-  // Always include origin even if there are no nodes.
-  ptsPrimary.unshift({ x: 0, y: 0, id: 0, kind: "origin" });
+  // Start marker: the walk's first point (or where you are, before the first point).
+  if (ptsPrimary.length) ptsPrimary[0] = { ...ptsPrimary[0], id: 0, kind: "origin" };
+  else ptsPrimary.push({ x: xMeters, y: yMeters, id: 0, kind: "origin" });
   // Include the current live position while recording so the route updates even between nodes.
   if (isRecording) ptsPrimary.push({ x: xMeters, y: yMeters, id: -1, kind: "live" });
 
@@ -517,18 +594,6 @@ function drawRoutePreview() {
     return { cx, cy };
   }
 
-  // Axes cross at origin (if in view).
-  const origin = toCanvas({ x: 0, y: 0 });
-  routeCtx.save();
-  routeCtx.strokeStyle = "rgba(255,255,255,0.18)";
-  routeCtx.lineWidth = 1;
-  routeCtx.beginPath();
-  routeCtx.moveTo(0, origin.cy);
-  routeCtx.lineTo(w, origin.cy);
-  routeCtx.moveTo(origin.cx, 0);
-  routeCtx.lineTo(origin.cx, h);
-  routeCtx.stroke();
-  routeCtx.restore();
 
   function strokePath(points, style) {
     if (points.length < 2) return;
@@ -551,9 +616,7 @@ function drawRoutePreview() {
   if (drawHistoricalListen) {
     for (const r of routes) {
       if (!r.nodes.length) continue;
-      const ptsH = [{ x: 0, y: 0, id: 0, kind: "origin2" }].concat(
-        r.nodes.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "secondary" })),
-      );
+      const ptsH = r.nodes.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "secondary" }));
       strokePath(ptsH, { strokeStyle: "rgba(255,255,255,0.2)", lineWidth: 2 });
     }
   }
@@ -561,8 +624,9 @@ function drawRoutePreview() {
   // Draw primary (current route) on top.
   strokePath(ptsPrimary, { strokeStyle: "rgba(10,132,255,0.95)", lineWidth: 3 });
 
-  // Points (spread coincident audio nodes so they are not hidden under the live marker)
-  const ptsPrimaryMarkers = spreadCoincidentNodeMarkersForDisplay(ptsPrimary);
+  // Markers: start (green) and, while recording, where you are (orange).
+  // Track points every 2 s are too dense to mark individually.
+  const ptsPrimaryMarkers = ptsPrimary.filter((p) => p.id === 0 || p.id === -1);
   routeCtx.save();
   for (const p of ptsPrimaryMarkers) {
     const { cx, cy } = toCanvas(p);
@@ -592,65 +656,76 @@ function drawRoutePreview() {
   }
 }
 
+// "Walk" panel: the walk being recorded, or the selected one.
 function renderNodesList() {
   nodesList.innerHTML = "";
-  const nodes = getViewingNodes();
-  nodesEmpty.hidden = nodes.length !== 0;
+  const walk = getViewingRoute();
+  nodesEmpty.hidden = Boolean(walk);
+  if (!walk) return;
 
-  for (const node of nodes) {
-    const li = document.createElement("li");
-    li.className = "node";
+  const li = document.createElement("li");
+  li.className = "node";
 
-    const top = document.createElement("div");
-    top.className = "node-top";
+  const top = document.createElement("div");
+  top.className = "node-top";
+  const title = document.createElement("div");
+  title.className = "node-title";
+  title.textContent = walk.name;
+  const meta = document.createElement("div");
+  meta.className = "node-meta";
+  meta.textContent = new Date(walk.createdAt).toLocaleString();
+  top.appendChild(title);
+  top.appendChild(meta);
 
-    const title = document.createElement("div");
-    title.className = "node-title";
-    title.textContent = `Node ${node.id}`;
+  const grid = document.createElement("div");
+  grid.className = "node-grid";
+  const kv = (k, v) => {
+    const wrap = document.createElement("div");
+    wrap.className = "kv";
+    const kk = document.createElement("div");
+    kk.className = "k";
+    kk.textContent = k;
+    const vv = document.createElement("div");
+    vv.className = "v";
+    vv.textContent = v;
+    wrap.appendChild(kk);
+    wrap.appendChild(vv);
+    return wrap;
+  };
+  const recording = walk === currentRecordingRoute;
+  const located = walk.nodes.filter((n) => Number.isFinite(n.lat)).length;
+  grid.appendChild(kv("Length", recording ? "Recording…" : formatClock(walk.durationS || 0)));
+  grid.appendChild(kv("Track points", `${walk.nodes.length} (${located} with GPS)`));
+  grid.appendChild(kv("Cloud", recording ? "—" : cloudStatusLabel(walk)));
+  grid.appendChild(kv("Share code", walk.shareCode || "—"));
+  li.appendChild(top);
+  li.appendChild(grid);
 
-    const meta = document.createElement("div");
-    meta.className = "node-meta";
-    meta.textContent = new Date(node.timestamp).toLocaleTimeString();
+  if (walk.cloudError && walk.cloud !== "saved") {
+    const note = document.createElement("p");
+    note.className = "hint";
+    note.textContent = walk.cloudError;
+    li.appendChild(note);
+  }
 
-    top.appendChild(title);
-    top.appendChild(meta);
-
-    const grid = document.createElement("div");
-    grid.className = "node-grid";
-
-    const kv = (k, v) => {
-      const wrap = document.createElement("div");
-      wrap.className = "kv";
-      const kk = document.createElement("div");
-      kk.className = "k";
-      kk.textContent = k;
-      const vv = document.createElement("div");
-      vv.className = "v";
-      vv.textContent = v;
-      wrap.appendChild(kk);
-      wrap.appendChild(vv);
-      return wrap;
-    };
-
-    grid.appendChild(kv("Steps", String(node.stepCount)));
-    grid.appendChild(kv("Heading", Number.isFinite(node.heading) ? `${node.heading.toFixed(0)}°` : "—"));
-    grid.appendChild(kv("x", node.x.toFixed(2)));
-    grid.appendChild(kv("y", node.y.toFixed(2)));
-    grid.appendChild(
-      kv("Lat, lng", Number.isFinite(node.lat) ? `${node.lat.toFixed(5)}, ${node.lng.toFixed(5)}` : "Waiting for GPS"),
-    );
-
+  if (!recording && walk.audioUrl) {
     const audio = document.createElement("audio");
     audio.controls = true;
     audio.preload = "none";
-    audio.src = node.audioUrl;
-
-    li.appendChild(top);
-    li.appendChild(grid);
+    audio.src = walk.audioUrl;
     li.appendChild(audio);
-
-    nodesList.appendChild(li);
   }
+
+  if (!recording && (walk.cloud === "failed" || walk.cloud === "pending")) {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "btn btn-ghost";
+    retry.textContent = "Upload now";
+    retry.addEventListener("click", () => uploadWalkNow(walk));
+    li.appendChild(retry);
+  }
+
+  nodesList.appendChild(li);
 }
 
 function renderRoutesPanel() {
@@ -681,7 +756,7 @@ function renderRoutesPanel() {
 
     const sub = document.createElement("div");
     sub.className = "route-sub";
-    sub.textContent = `${route.nodes.length} nodes · ${new Date(route.createdAt).toLocaleString()}`;
+    sub.textContent = `${formatClock(route.durationS || 0)} · ${cloudStatusLabel(route)} · ${new Date(route.createdAt).toLocaleDateString()}`;
 
     btn.appendChild(title);
     btn.appendChild(sub);
@@ -710,8 +785,8 @@ function triggerDownload(url, filename) {
   a.remove();
 }
 
-function getNodeAudioExtension(node) {
-  const type = node.audioBlob?.type || "";
+function getWalkAudioExtension(walk) {
+  const type = walk.audioMime || walk.audioBlob?.type || "";
   if (type.includes("mp4") || type.includes("aac")) return "m4a";
   if (type.includes("mpeg")) return "mp3";
   if (type.includes("wav")) return "wav";
@@ -720,14 +795,8 @@ function getNodeAudioExtension(node) {
   return "m4a";
 }
 
-function getSavedAudioNodes() {
-  const out = [];
-  for (const route of routes) {
-    for (const node of route.nodes || []) {
-      if (node.audioUrl) out.push({ route, node });
-    }
-  }
-  return out;
+function getWalksWithAudio() {
+  return routes.filter((r) => r.audioUrl);
 }
 
 function drawRouteDownloadImage(route, canvasSize = 900) {
@@ -762,14 +831,13 @@ function drawRouteDownloadImage(route, canvasSize = 900) {
 
   ctx.fillStyle = "#f3f3f6";
   ctx.font = "bold 34px system-ui, -apple-system, sans-serif";
-  ctx.fillText(`${route.name} estimated route`, 42, 58);
+  ctx.fillText(route.name, 42, 58);
   ctx.fillStyle = "#b8b8c3";
   ctx.font = "22px system-ui, -apple-system, sans-serif";
-  ctx.fillText(`${route.nodes.length} nodes · ${new Date(route.createdAt).toLocaleString()}`, 42, 92);
+  ctx.fillText(`${formatClock(route.durationS || 0)} · ${new Date(route.createdAt).toLocaleString()}`, 42, 92);
 
-  const pts = [{ x: 0, y: 0, id: 0, kind: "origin" }].concat(
-    route.nodes.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "node" })),
-  );
+  const pts = route.nodes.map((n, i) => ({ x: n.x, y: n.y, id: i === 0 ? 0 : n.id, kind: i === 0 ? "origin" : "node" }));
+  if (pts.length === 0) pts.push({ x: 0, y: 0, id: 0, kind: "origin" });
 
   let minX = Infinity,
     maxX = -Infinity,
@@ -803,17 +871,6 @@ function drawRouteDownloadImage(route, canvasSize = 900) {
     return { cx, cy };
   }
 
-  const origin = toCanvas({ x: 0, y: 0 });
-  ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,0.18)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, origin.cy);
-  ctx.lineTo(w, origin.cy);
-  ctx.moveTo(origin.cx, topPad);
-  ctx.lineTo(origin.cx, h);
-  ctx.stroke();
-  ctx.restore();
 
   if (pts.length > 1) {
     ctx.save();
@@ -831,7 +888,7 @@ function drawRouteDownloadImage(route, canvasSize = 900) {
     ctx.restore();
   }
 
-  const markers = spreadCoincidentNodeMarkersForDisplay(pts);
+  const markers = pts.filter((pt) => pt.id === 0);
   for (const pt of markers) {
     const { cx, cy } = toCanvas(pt);
     const isOrigin = pt.id === 0;
@@ -854,33 +911,25 @@ async function downloadRouteImage(route) {
 }
 
 async function downloadAllNodeAudio() {
-  const audioNodes = getSavedAudioNodes();
-  if (audioNodes.length === 0) {
-    downloadStatus.textContent = "No node audio to download yet.";
+  const walks = getWalksWithAudio();
+  if (walks.length === 0) {
+    downloadStatus.textContent = "No walk audio to download yet.";
     return;
   }
-
-  downloadStatus.textContent = `Starting ${audioNodes.length} audio downloads…`;
-  debugLog("[download] all node audio", { count: audioNodes.length });
-
-  for (let i = 0; i < audioNodes.length; i += 1) {
-    const { route, node } = audioNodes[i];
-    const ext = getNodeAudioExtension(node);
-    const filename = `${sanitizeFilenamePart(route.name)}-node-${String(node.id).padStart(2, "0")}.${ext}`;
-    triggerDownload(node.audioUrl, filename);
+  downloadStatus.textContent = `Starting ${walks.length} audio downloads…`;
+  for (const walk of walks) {
+    triggerDownload(walk.audioUrl, `${sanitizeFilenamePart(walk.name)}.${getWalkAudioExtension(walk)}`);
     // Give mobile Safari a moment between automatic downloads.
     await sleep(250);
   }
-
-  downloadStatus.textContent = `Started ${audioNodes.length} audio downloads.`;
+  downloadStatus.textContent = `Started ${walks.length} audio downloads.`;
 }
 
 function renderDownloadsPanel() {
   downloadRoutesList.innerHTML = "";
   downloadsEmpty.hidden = routes.length !== 0;
 
-  const audioNodes = getSavedAudioNodes();
-  downloadAllAudioBtn.disabled = audioNodes.length === 0;
+  downloadAllAudioBtn.disabled = getWalksWithAudio().length === 0;
 
   for (const route of routes) {
     const li = document.createElement("li");
@@ -895,7 +944,7 @@ function renderDownloadsPanel() {
     title.textContent = route.name;
     const sub = document.createElement("div");
     sub.className = "download-route-sub";
-    sub.textContent = `${route.nodes.length} nodes · PNG route map`;
+    sub.textContent = `${formatClock(route.durationS || 0)} · PNG route map`;
     copy.appendChild(title);
     copy.appendChild(sub);
 
@@ -920,7 +969,9 @@ function updateDeleteRouteButton() {
 }
 
 function getListenSourceRoutes() {
-  return routes.filter((r) => r.nodes && r.nodes.length > 0);
+  return routes.filter(
+    (r) => r.audioUrl && r.nodes?.some((n) => Number.isFinite(n.x) && Number.isFinite(n.y)),
+  );
 }
 
 function renderListenRouteOptions() {
@@ -942,9 +993,10 @@ function stopListeningPlayback(reason) {
       reason ? `(${reason})` : "",
     );
   }
+  clearTimeout(listenSegmentTimer);
+  listenSegmentTimer = null;
   try {
     currentAudio?.pause();
-    if (currentAudio) currentAudio.currentTime = 0;
   } catch {
     // ignore
   }
@@ -1053,7 +1105,7 @@ function startVolumeTracking() {
     // Optional UI: show angle + volume.
     // Keep it short to avoid UI jitter: only update playbackText.
     const playingRoute = currentlyPlayingRouteId ? getRouteById(currentlyPlayingRouteId) : null;
-    const playingLabel = playingRoute ? `${playingRoute.name} · Node ${currentlyPlayingNodeId}` : `Node ${currentlyPlayingNodeId}`;
+    const playingLabel = playingRoute ? playingRoute.name : "a walk";
     playbackText.textContent = `${playingLabel} (Angle ${angleDiff.toFixed(0)}° / v=${v.toFixed(2)})`;
 
     const now = performance.now();
@@ -1204,18 +1256,39 @@ function updateListenMode(currentX, currentY, heading) {
   if (Number.isFinite(currentRouteDirectionDeg)) {
     console.log("[listen] Route direction:", currentRouteDirectionDeg.toFixed(0));
   }
+  // Play the walk's recording from the second this point was recorded.
+  playWalkFrom(ownerRoute, node.t);
+  startVolumeTracking();
+  scheduleRouteRedraw();
+}
+
+function playWalkFrom(walk, seconds) {
+  if (!currentAudio) currentAudio = listenAudio;
+  const audio = currentAudio;
+  const start = Math.max(0, Number(seconds) || 0);
   try {
-    if (!currentAudio) currentAudio = listenAudio;
-    currentAudio.src = node.audioUrl;
-    currentAudio.currentTime = 0;
-    currentAudio.volume = 1;
-    const p = currentAudio.play();
-    if (p && typeof p.catch === "function") p.catch((e) => console.log("[listen] play() failed", e));
+    if (audio.src !== walk.audioUrl) {
+      audio.preload = "auto";
+      audio.src = walk.audioUrl;
+    }
+    audio.volume = 1;
+    const seekAndPlay = () => {
+      try {
+        audio.currentTime = start;
+      } catch (e) {
+        console.log("[listen] seek failed", e);
+      }
+      const p = audio.play();
+      if (p && typeof p.catch === "function") p.catch((e) => console.log("[listen] play() failed", e));
+    };
+    if (audio.readyState >= 1) seekAndPlay();
+    else audio.addEventListener("loadedmetadata", seekAndPlay, { once: true });
   } catch (e) {
     console.log("[listen] play error", e);
   }
-  startVolumeTracking();
-  scheduleRouteRedraw();
+  clearTimeout(listenSegmentTimer);
+  listenSegmentTimer = setTimeout(() => finishListenSegment("segment finished"), LISTEN_SEGMENT_SECONDS * 1000);
+  debugLog("[listen] playing", walk.name, "from", `${start.toFixed(1)}s`);
 }
 
 async function requestMotionPermissionIfNeeded() {
@@ -1364,6 +1437,8 @@ function startSensorTracking() {
       syncPositionFromFusion();
       if (firstAnchor) {
         debugLog("[gps] anchored", { lat: f.origin.lat.toFixed(6), lng: f.origin.lng.toFixed(6) });
+        fillNodeLatLng();
+        projectWalks();
       }
       if (f.hasOrigin) fillNodeLatLng();
       updateMetricsUI();
@@ -1514,204 +1589,67 @@ async function startRecordingSession() {
     }
     isCalibrating = false;
 
-    // 5) Start MediaRecorder loop producing *independent* 8-second files.
-    //
-    // iPhone Safari gotcha:
-    // Using `mediaRecorder.start(timeslice)` can emit "fragment" blobs after the first one,
-    // which often won't play back as standalone audio files.
-    // So we STOP and RESTART recording every 8 seconds, building a self-contained Blob per node.
+    // 5) One continuous recording for the whole walk (max 5 minutes), plus a
+    // track point every 2 seconds that remembers the second of audio it matches.
     if (!window.MediaRecorder) {
       throw new Error("MediaRecorder is not supported in this browser.");
     }
 
-    const options = {};
-    // Safari support varies; letting it pick tends to be most compatible.
-    // You can experiment with explicit types later:
-    // options.mimeType = "audio/mp4";
-    // options.mimeType = "audio/webm;codecs=opus";
+    const walk = currentRecordingRoute;
+    let rec;
+    try {
+      rec = new MediaRecorder(mediaStream, { audioBitsPerSecond: AUDIO_BITS_PER_SECOND });
+    } catch (e) {
+      debugLog("[audio] bitrate option rejected, using defaults", e?.message || e);
+      rec = new MediaRecorder(mediaStream);
+    }
+    mediaRecorder = rec;
+    const chunks = [];
 
-    // Node ids are incremental within a route.
-    let nodeId = currentRecordingRoute.nodes.length + 1;
-
-    const recordOneChunk = () =>
-      new Promise((resolve, reject) => {
-        let settled = false;
-        let chunkTimer = null;
-        let hardTimer = null;
-
-        const cleanupTimers = () => {
-          if (chunkTimer != null) {
-            clearTimeout(chunkTimer);
-            chunkTimer = null;
-            activeChunkStopTimer = null;
-          }
-          if (hardTimer != null) {
-            clearTimeout(hardTimer);
-            hardTimer = null;
-          }
-        };
-
-        const finish = (payload) => {
-          if (settled) return;
-          settled = true;
-          cleanupTimers();
-          resolve(payload);
-        };
-
-        const fail = (err) => {
-          if (settled) return;
-          settled = true;
-          cleanupTimers();
-          reject(err instanceof Error ? err : new Error(String(err)));
-        };
-
-        const chunkStart = Date.now();
-        const chunks = [];
-
-        let rec;
-        try {
-          rec = new MediaRecorder(mediaStream, options);
-        } catch (e) {
-          debugLog("[audio] MediaRecorder constructor failed", e?.message || e);
-          fail(e);
-          return;
-        }
-
-        mediaRecorder = rec;
-        lastChunkStartMs = chunkStart;
-
-        rec.addEventListener("dataavailable", (ev) => {
-          if (ev.data && ev.data.size > 0) chunks.push(ev.data);
-        });
-        rec.addEventListener("error", (e) => {
-          const err = e.error || e;
-          debugLog("[audio] MediaRecorder error event", err?.name, err?.message || err);
-          fail(err);
-        });
-        rec.addEventListener("start", () => {
-          debugLog("[audio] chunk started", { mime: rec.mimeType, state: rec.state });
-        });
-        rec.addEventListener("stop", () => {
-          const totalBytes = chunks.reduce((s, b) => s + b.size, 0);
-          debugLog("[audio] chunk stopped", { parts: chunks.length, totalBytes });
-          const blob = new Blob(chunks, { type: chunks[0]?.type || rec.mimeType || "" });
-          const durationSeconds = Math.max(0.1, (Date.now() - chunkStart) / 1000);
-          finish({ blob, durationSeconds, timestamp: Date.now() });
-        });
-
-        try {
-          rec.start();
-        } catch (e) {
-          debugLog("[audio] rec.start() failed", e?.message || e);
-          fail(e);
-          return;
-        }
-
-        hardTimer = window.setTimeout(() => {
-          hardTimer = null;
-          if (settled) return;
-          debugLog("[audio] chunk HARD timeout (no stop event)", { ms: CHUNK_HARD_TIMEOUT_MS });
-          fail(new Error("Audio chunk stalled: MediaRecorder did not finish"));
-        }, CHUNK_HARD_TIMEOUT_MS);
-
-        chunkTimer = window.setTimeout(() => {
-          chunkTimer = null;
-          activeChunkStopTimer = null;
-          try {
-            if (rec.state !== "inactive") {
-              debugLog("[audio] chunk timer fired → stop()", { state: rec.state });
-              rec.stop();
-            } else {
-              debugLog("[audio] chunk timer fired but recorder already inactive");
-            }
-          } catch (e) {
-            debugLog("[audio] rec.stop() threw", e?.message || e);
-            fail(e);
-          }
-        }, CHUNK_MS);
-        activeChunkStopTimer = chunkTimer;
+    recordingLoopPromise = new Promise((resolve) => {
+      let done = false;
+      const finish = (why) => {
+        if (done) return;
+        done = true;
+        const blob = new Blob(chunks, { type: chunks[0]?.type || rec.mimeType || "audio/mp4" });
+        walk.audioBlob = blob;
+        walk.audioMime = blob.type || rec.mimeType || "audio/mp4";
+        walk.durationS = Math.min(MAX_WALK_SECONDS, Math.max(0, (Date.now() - walk.recordStartMs) / 1000));
+        if (walk.audioUrl) URL.revokeObjectURL(walk.audioUrl);
+        walk.audioUrl = blob.size > 0 ? URL.createObjectURL(blob) : null;
+        debugLog("[audio] recording finished", { why, bytes: blob.size, mime: walk.audioMime, seconds: walk.durationS });
+        resolve();
+      };
+      rec.addEventListener("dataavailable", (ev) => {
+        if (ev.data && ev.data.size > 0) chunks.push(ev.data);
       });
+      rec.addEventListener("error", (e) => {
+        const err = e.error || e;
+        debugLog("[audio] MediaRecorder error", err?.name, err?.message || err);
+        setError(`Audio recording error: ${err?.message || err}. Tap End Walk to keep what was recorded.`);
+      });
+      rec.addEventListener("stop", () => finish("stop event"));
+      walk.finishRecording = finish;
+    });
 
-    const recordingLoop = async () => {
-      let consecutiveFailures = 0;
-      try {
-        while (isRecording) {
-          try {
-            const { blob, durationSeconds, timestamp } = await recordOneChunk();
-            consecutiveFailures = 0;
+    rec.start();
+    walk.recordStartMs = Date.now();
+    recordTrackPoint(walk); // t = 0: where the walk starts
+    trackPointTimer = setInterval(() => recordTrackPoint(walk), POINT_INTERVAL_MS);
+    recordingClockTimer = setInterval(updateRecordingClock, 1000);
+    walkLimitTimer = setTimeout(() => {
+      debugLog("[rec] 5-minute limit reached");
+      endWalk();
+    }, MAX_WALK_SECONDS * 1000);
+    debugLog("[audio] recording started", { mime: rec.mimeType });
 
-            if (!blob || blob.size === 0) {
-              debugLog("[audio] empty chunk ignored");
-              continue;
-            }
-
-            const url = URL.createObjectURL(blob);
-            const nodeLatLng = fusion.toLatLng(xMeters, yMeters);
-            const node = {
-              id: nodeId++,
-              timestamp,
-              stepCount,
-              heading: headingDeg,
-              x: xMeters,
-              y: yMeters,
-              lat: nodeLatLng ? nodeLatLng.lat : null,
-              lng: nodeLatLng ? nodeLatLng.lng : null,
-              uncertaintyM: fusion.hasOrigin ? fusion.uncertaintyM : null,
-              audioBlob: blob,
-              audioUrl: url,
-              durationSeconds: Math.round(durationSeconds),
-            };
-
-            currentRecordingRoute.nodes.push(node);
-            debugLog("[route] Node added", currentRecordingRoute.name, {
-              id: node.id,
-              bytes: blob.size,
-              type: blob.type || "unknown",
-              x: node.x,
-              y: node.y,
-            });
-
-            updateMetricsUI();
-            renderNodesList();
-            drawRoutePreview();
-          } catch (err) {
-            consecutiveFailures += 1;
-            debugLog("[rec] recordOneChunk failed", err?.message || err, {
-              consecutiveFailures,
-              max: CHUNK_MAX_CONSECUTIVE_FAILURES,
-            });
-            if (!isRecording) break;
-            if (consecutiveFailures >= CHUNK_MAX_CONSECUTIVE_FAILURES) {
-              setError(
-                "Audio capture failed repeatedly. Tap End Walk to save the nodes you already have, then start a new walk.",
-              );
-              setStatus("Recording error (audio)");
-              debugLog("[rec] too many chunk failures — stopping sensors & mic");
-              isRecording = false;
-              setTimeout(() => {
-                stopRecordingSession({ keepNodes: true, silent: true }).catch((e) =>
-                  debugLog("[rec] stopRecordingSession after errors", e?.message || e),
-                );
-              }, 0);
-              break;
-            }
-            await sleep(CHUNK_RETRY_BACKOFF_MS);
-          }
-        }
-      } finally {
-        debugLog("[rec] recording loop ended", { isRecording });
-      }
-    };
-
-    recordingLoopPromise = recordingLoop();
-
-    setStatus("Recording…");
-    permText.textContent = formatPermStatus(["Microphone OK", "Motion listening", "Orientation listening"]);
+    updateRecordingClock();
+    permText.textContent = formatPermStatus(["Microphone OK", "Motion listening", "Orientation listening", "Location on"]);
     updateMetricsUI();
 
     // Important: audio playback must be user-initiated on iOS. We only render controls;
     // user tapping play is a gesture, so that's OK.
-    debugLog("[rec] session started", { chunkMs: CHUNK_MS, route: currentRecordingRoute?.name });
+    debugLog("[rec] session started", { route: currentRecordingRoute?.name });
   } catch (err) {
     debugLog("[rec] start failed:", err?.message || err);
     setError(err?.message || String(err));
@@ -1731,6 +1669,15 @@ async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, s
   }
 
   console.log("[rec] stopping…");
+  // Last track point, so the walk ends where you stopped.
+  if (isRecording && currentRecordingRoute?.recordStartMs) recordTrackPoint(currentRecordingRoute);
+  clearInterval(trackPointTimer);
+  clearInterval(recordingClockTimer);
+  clearTimeout(walkLimitTimer);
+  trackPointTimer = null;
+  recordingClockTimer = null;
+  walkLimitTimer = null;
+
   isRecording = false;
   isCalibrating = false;
   stopSensorTracking();
@@ -1753,9 +1700,16 @@ async function stopRecordingSession({ keepNodes, silent } = { keepNodes: true, s
     console.log("[rec] recorder stop error", e);
   }
 
-  // Wait for the loop to finish cleanly (so the last chunk can be saved).
+  // Wait for the recorder to hand over the audio (Safari sometimes never fires
+  // `stop`; then keep whatever arrived).
   try {
-    if (recordingLoopPromise) await recordingLoopPromise;
+    if (recordingLoopPromise) {
+      const walk = currentRecordingRoute;
+      await Promise.race([
+        recordingLoopPromise,
+        sleep(RECORDER_STOP_TIMEOUT_MS).then(() => walk?.finishRecording?.("stop timeout")),
+      ]);
+    }
   } catch (e) {
     console.log("[rec] loop await error", e);
   } finally {
@@ -1811,57 +1765,176 @@ function startNewWalk() {
   startRecordingSession();
 }
 
-async function endWalk() {
-  if (!currentRecordingRoute) return;
-
-  if (isRecording) {
-    await stopRecordingSession({ keepNodes: true, silent: false });
-  }
-
-  routes.unshift(currentRecordingRoute);
-  selectedRoute = currentRecordingRoute;
-  debugLog("[route] Route saved", currentRecordingRoute.name, {
-    nodes: currentRecordingRoute.nodes.length,
-  });
-  currentRecordingRoute = null;
-
-  renderRoutesPanel();
-  renderListenRouteOptions();
-  renderDownloadsPanel();
-  updateMetricsUI();
-  renderNodesList();
-  drawRoutePreview();
-  updateDeleteRouteButton();
-  setButtonsForRecording(false);
-
-  // Stop any listening playback when walk ends (keeps things predictable).
-  stopListeningPlayback("walk ended");
+function defaultWalkName(ms) {
+  const d = new Date(ms);
+  const date = d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return `Walk ${date}, ${time}`;
 }
 
-function deleteSelectedRoute() {
+function hasLocatedNodes(walk) {
+  return walk.nodes.some((n) => Number.isFinite(n.lat) && Number.isFinite(n.lng));
+}
+
+async function endWalk() {
+  if (!currentRecordingRoute || endingWalk) return;
+  endingWalk = true;
+  try {
+    if (isRecording || mediaRecorder || mediaStream) {
+      await stopRecordingSession({ keepNodes: true, silent: false });
+    }
+    const walk = currentRecordingRoute;
+    currentRecordingRoute = null;
+    delete walk.finishRecording;
+
+    if (!walk.audioBlob || walk.audioBlob.size === 0) {
+      setError("No audio was recorded, so this walk was not saved.");
+      debugLog("[route] discarded: no audio", walk.id);
+      selectedRoute = routes[0] || null;
+      renderAll();
+      setButtonsForRecording(false);
+      return;
+    }
+
+    const suggested = defaultWalkName(walk.createdAt);
+    let typed = null;
+    try {
+      typed = window.prompt("Name this walk", suggested);
+    } catch {
+      // ignore: some contexts block prompts
+    }
+    walk.name = (typed && typed.trim().slice(0, 80)) || suggested;
+    walk.isPublic = false;
+
+    routes.unshift(walk);
+    selectedRoute = walk;
+    debugLog("[route] walk saved on device", walk.name, { points: walk.nodes.length, seconds: walk.durationS });
+    renderAll();
+    setButtonsForRecording(false);
+    stopListeningPlayback("walk ended");
+
+    await keepAndUpload(walk);
+  } finally {
+    endingWalk = false;
+  }
+}
+
+// Store the walk in this browser first, then upload it. If the upload fails,
+// it stays on the device and is retried next time the page opens.
+async function keepAndUpload(walk) {
+  if (!hasLocatedNodes(walk)) {
+    walk.cloud = "device";
+    walk.cloudError = "No GPS position during this walk, so it stays on this device until you reload.";
+    renderAll();
+    return;
+  }
+  walk.cloud = "pending";
+  try {
+    await savePendingWalk({
+      id: walk.id,
+      name: walk.name,
+      createdAt: walk.createdAt,
+      durationS: walk.durationS,
+      audioMime: walk.audioMime,
+      audioBlob: walk.audioBlob,
+      nodes: walk.nodes.map(({ id, t, timestamp, stepCount, heading, x, y, lat, lng, uncertaintyM }) => ({
+        id, t, timestamp, stepCount, heading, x, y, lat, lng, uncertaintyM,
+      })),
+    });
+  } catch (e) {
+    debugLog("[store] could not keep walk on device", e?.message || e);
+  }
+  await uploadWalkNow(walk);
+}
+
+async function uploadWalkNow(walk) {
+  walk.cloud = "uploading";
+  walk.cloudError = "";
+  renderAll();
+  try {
+    const cloud = await import("./cloud.js");
+    const result = await cloud.uploadWalk(walk);
+    walk.audioPath = result.audioPath;
+    walk.shareCode = result.shareCode;
+    walk.isPublic = result.isPublic;
+    walk.cloud = "saved";
+    await deletePendingWalk(walk.id).catch(() => {});
+    debugLog("[cloud] walk uploaded", walk.name, result.shareCode);
+  } catch (e) {
+    walk.cloud = "failed";
+    walk.cloudError = e?.message || String(e);
+    debugLog("[cloud] upload failed", walk.cloudError);
+  }
+  renderAll();
+}
+
+function cloudStatusLabel(walk) {
+  switch (walk.cloud) {
+    case "saved":
+      return walk.isPublic ? "Saved · public" : "Saved · private";
+    case "uploading":
+      return "Uploading…";
+    case "pending":
+      return "Waiting to upload";
+    case "failed":
+      return "Upload failed · will retry";
+    case "device":
+      return "On this device only";
+    default:
+      return "Not saved yet";
+  }
+}
+
+async function deleteSelectedRoute() {
   if (isRecording) return;
   if (!selectedRoute) return;
+  const walk = selectedRoute;
 
-  // Revoke object URLs to avoid leaking memory.
-  for (const n of selectedRoute.nodes) {
+  if (walk.cloud === "uploading") {
+    setError("This walk is still uploading. Try again in a moment.");
+    return;
+  }
+  const ok = window.confirm(
+    `Delete “${walk.name}”?\n\nIts recording and route are removed for good, including from anyone who saved it.`,
+  );
+  if (!ok) return;
+
+  setError("");
+  try {
+    if (walk.cloud === "saved") {
+      setStatus("Deleting…");
+      const cloud = await import("./cloud.js");
+      await cloud.deleteWalk(walk);
+    } else if (walk.cloud === "failed" || walk.audioPath) {
+      // A half-finished upload may have left something in the cloud: try to
+      // clean it up, but don't block deleting the copy on this device.
+      try {
+        const cloud = await import("./cloud.js");
+        await cloud.deleteWalk(walk);
+      } catch (e) {
+        debugLog("[cloud] cleanup of unfinished upload failed", e?.message || e);
+      }
+    }
+    await deletePendingWalk(walk.id).catch(() => {});
+  } catch (e) {
+    setStatus("Not recording");
+    setError(`Could not delete this walk: ${e?.message || e}`);
+    return;
+  }
+  setStatus("Walk deleted");
+
+  if (walk.audioUrl?.startsWith("blob:")) {
     try {
-      if (n.audioUrl) URL.revokeObjectURL(n.audioUrl);
+      URL.revokeObjectURL(walk.audioUrl);
     } catch {
       // ignore
     }
   }
 
-  const deletedRouteId = selectedRoute.id;
+  const deletedRouteId = walk.id;
   routes = routes.filter((r) => r.id !== deletedRouteId);
-  console.log("[route] deleted", selectedRoute.name);
+  debugLog("[route] deleted", walk.name);
   selectedRoute = routes[0] || null;
-
-  renderRoutesPanel();
-  renderDownloadsPanel();
-  updateMetricsUI();
-  renderNodesList();
-  drawRoutePreview();
-  updateDeleteRouteButton();
 
   if (listenModeEnabled && currentlyPlayingRouteId === deletedRouteId) {
     stopListeningPlayback("playing route deleted");
@@ -1874,11 +1947,21 @@ function deleteSelectedRoute() {
     stopListeningPlayback("no listenable routes left");
     setListenToggleUI();
   }
-  renderListenRouteOptions();
+  renderAll();
   if (listenModeEnabled) {
     lastDirectionUpdateMs = 0;
     updateListenMode(xMeters, yMeters, headingDeg);
   }
+}
+
+function renderAll() {
+  renderRoutesPanel();
+  renderListenRouteOptions();
+  renderDownloadsPanel();
+  updateMetricsUI();
+  renderNodesList();
+  drawRoutePreview();
+  updateDeleteRouteButton();
 }
 
 // Buttons (must be user gesture)
@@ -1946,6 +2029,7 @@ async function connectCloud() {
     const visibleWalks = await checkDatabase();
     cloudText.textContent = `Connected · ${visibleWalks} walk${visibleWalks === 1 ? "" : "s"} visible`;
     debugLog("[cloud] database ok, visible walks:", visibleWalks);
+    await loadMyWalks();
   } catch (err) {
     const message = err?.message || String(err);
     if (accountText.textContent === "Connecting…") accountText.textContent = "Not connected";
@@ -1954,5 +2038,66 @@ async function connectCloud() {
   }
 }
 
+// Walks waiting on this device (an upload that didn't finish) — shown even offline.
+async function loadPendingWalks() {
+  try {
+    const pending = await listPendingWalks();
+    for (const p of pending) {
+      if (routes.some((r) => r.id === p.id)) continue;
+      routes.push({
+        ...p,
+        audioUrl: p.audioBlob ? URL.createObjectURL(p.audioBlob) : null,
+        cloud: "pending",
+        isPublic: false,
+      });
+    }
+    if (pending.length) debugLog("[store] walks waiting to upload:", pending.length);
+  } catch (e) {
+    debugLog("[store] could not read walks on this device", e?.message || e);
+  }
+}
+
+let audioUrlsSignedAt = 0;
+async function refreshAudioUrls(cloud) {
+  const saved = routes.filter((r) => r.cloud === "saved" && r.audioPath);
+  if (!saved.length) return;
+  const urls = await cloud.signAudioUrls(saved.map((r) => r.audioPath));
+  for (const r of saved) {
+    const url = urls.get(r.audioPath);
+    if (url) r.audioUrl = url;
+  }
+  audioUrlsSignedAt = Date.now();
+}
+
+async function loadMyWalks() {
+  await loadPendingWalks();
+  const cloud = await import("./cloud.js");
+  const mine = await cloud.loadMyWalks();
+  for (const w of mine) {
+    if (routes.some((r) => r.id === w.id)) continue;
+    routes.push({ ...w, cloud: "saved", fromCloud: true });
+  }
+  await refreshAudioUrls(cloud);
+  routes.sort((a, b) => b.createdAt - a.createdAt);
+  projectWalks();
+  if (!selectedRoute && !currentRecordingRoute) selectedRoute = routes[0] || null;
+  renderAll();
+  debugLog("[cloud] my walks loaded:", mine.length);
+
+  // Signed audio links expire after an hour: renew them in good time.
+  setInterval(() => {
+    refreshAudioUrls(cloud).catch((e) => debugLog("[cloud] could not renew audio links", e?.message || e));
+  }, 40 * 60 * 1000);
+
+  // Retry walks that didn't finish uploading last time.
+  for (const r of routes.filter((x) => x.cloud === "pending")) {
+    await uploadWalkNow(r);
+  }
+}
+
+loadPendingWalks().then(() => {
+  projectWalks();
+  renderAll();
+});
 connectCloud();
 
