@@ -1842,3 +1842,29 @@ updateListenMode();
 
 debugLog("[init] SoundRoute prototype loaded");
 
+// Cloud connection (Supabase). Loaded with a dynamic import so the on-device
+// prototype keeps working even if the network or the CDN is unavailable.
+const accountText = document.getElementById("accountText");
+const cloudText = document.getElementById("cloudText");
+
+async function connectCloud() {
+  try {
+    const { ensureVisitor, checkDatabase } = await import("./supabase.js");
+    const visitor = await ensureVisitor();
+    const kind = visitor.is_anonymous ? "Anonymous" : visitor.email || "Signed in";
+    accountText.textContent = `${kind} · ${visitor.id.slice(0, 8)}`;
+    debugLog("[cloud] signed in", visitor.id, visitor.is_anonymous ? "(anonymous)" : "");
+
+    const visibleWalks = await checkDatabase();
+    cloudText.textContent = `Connected · ${visibleWalks} walk${visibleWalks === 1 ? "" : "s"} visible`;
+    debugLog("[cloud] database ok, visible walks:", visibleWalks);
+  } catch (err) {
+    const message = err?.message || String(err);
+    if (accountText.textContent === "Connecting…") accountText.textContent = "Not connected";
+    cloudText.textContent = message;
+    debugLog("[cloud] error", message);
+  }
+}
+
+connectCloud();
+
