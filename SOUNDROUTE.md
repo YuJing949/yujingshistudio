@@ -107,7 +107,7 @@
 | 4 回放与切换 | 连续播放、淡入淡出、切换、重新对齐、朝向音量、预缓存 | 代码完成；决策单元测试和模拟端到端测试通过，**未在手机上测试** |
 | 5 我的地图 | 收藏列表、改名、公开或私密、复制分享码、用分享码收藏、取消收藏；收藏的旅程加入收听 | 代码完成；双人模拟测试通过，**未在手机上测试** |
 | 6 城市广场 | 夜间灯光式光点图、点击光点列出公开旅程、试听 20 秒、收藏、Near me | 代码完成；双人模拟测试通过，**未在手机上测试** |
-| 7 打磨 | 见下 | 未开始 |
+| 7 打磨 | 首次引导、添加到主屏幕（PWA）、邮箱绑定与跨设备登录、举报与自动隐藏、每日上限、隐去起点 | 代码完成；模拟测试通过，**未在手机上测试**；需要在 Supabase 做三项设置（见下） |
 
 ### 下一步：先在手机上验证阶段 2 和 3
 
@@ -159,7 +159,23 @@
 - 数据来自 `supabase.rpc('get_plaza_cells')`。
 - 点击光点，列出这一带的公开旅程（按 `center_lat/lng` 范围查 `routes where is_public`），可试听开头并收藏。
 
-### 阶段 7：打磨
+### 阶段 7：打磨（代码已完成，待手机验证）
+
+已实现：
+- **首次引导**（`#guide`，4 步：介绍、三个权限、保存旅程/添加到主屏幕、找东西听）。看过后存 `localStorage['soundroute-guide']`；页头 “?” 按钮可重新打开。已安装为主屏幕应用时跳过“添加到主屏幕”那一步。
+- **PWA**：`manifest.webmanifest`、`icons/`（原创图标：暖色光点加声波）、Apple 主屏幕相关 meta；页头横幅提示添加到主屏幕（可关闭）；启动时调用 `navigator.storage.persist()`。没有加 Service Worker（避免更新缓存问题）。
+- **账号**（“Your account” 区域，`supabase.js` 的 `linkEmail` / `confirmLinkCode` / `sendSignIn` / `confirmSignInCode` / `signOut`）：匿名用户绑定邮箱后变成正式账号，用户 ID 不变，旅程不丢；在另一台设备用邮箱登录即可取回。邮件里既有链接也有 6 位验证码。验证码是为主屏幕应用准备的：在主屏幕应用里点邮件链接会跳到 Safari，所以要在应用里输入验证码。
+- **举报**：广场列表和收藏的旅程上有 Report 按钮，可选填原因。同一条旅程被 3 个不同的人举报后，`routes.hidden = true`：除作者外所有人都看不到，广场也不再显示。作者会看到提示。处理方式：在 Supabase 的 Table Editor 查看 `reports` 表；没问题就把 `routes.hidden` 改回 false，有问题就删除那一行。
+- **每日上限**：每人每天最多 30 段旅程、20 次举报（数据库触发器）。
+- **隐去起点**：上传时去掉旅程开头 30 米的轨迹点（很短的旅程去掉三分之一）。录音不变，只是起点附近不会触发播放，起点位置也不会被存储。
+- **收听提示**：300 米内没有可听的旅程时，提示去城市广场；否则显示最近旅程的距离。
+
+**需要在 Supabase 后台完成的设置：**
+1. 重新运行 `supabase/soundroute.sql`（新增 `reports` 表、`hidden` 列、触发器和更新后的权限规则；可以重复运行）。
+2. Authentication → URL Configuration：Site URL 填正式站地址；Redirect URLs 加上 `https://soundroute-preview.zoesyj1130.workers.dev/**` 和 `https://soundroute.yujingshistudio.com/**`。
+3. Authentication → Emails → Templates：在 **Magic Link** 和 **Change Email Address** 两个模板里加上 `Your code: {{ .Token }}`，这样邮件里才会有验证码。注意：Supabase 自带的邮件服务每小时只能发很少几封，正式使用前要在 SMTP Settings 里接入自己的邮件服务（例如 Resend）。
+
+原计划：
 
 - 首次引导：逐个解释权限；帮新用户在出门前收藏至少一条旅程（否则第一次走路什么都听不到）；附近没有旅程时推荐别的玩法。
 - PWA：manifest，引导添加到主屏幕。否则 iPhone Safari 7 天不访问会清除匿名身份。
@@ -180,6 +196,8 @@ python3 tests/soundroute/run.py
 测试覆盖：录音 → 上传 → 刷新后仍在 → 第二次走同一路线时从对应秒数连续播放 → 离线上传失败后自动重传 → 删除。
 
 收听决策的单元测试：`node tests/soundroute/decide.test.mjs`。
+
+第七阶段测试：`python3 tests/soundroute/polish.py`（首次引导、主屏幕横幅、隐去起点、三人举报后隐藏、邮箱绑定；假的 Supabase 只接受验证码 123456）。
 
 我的地图和城市广场的双人测试：`python3 tests/soundroute/share.py`（A 公开一条、保留一条私密；B 在广场试听并收藏、用分享码收藏、走路时听到、取消收藏；A 删除后 B 的收藏随之消失）。假的 Supabase 通过 `localStorage.setItem('fake-uid', …)` 切换用户，并模拟了数据库的可见性规则。
 改了 `cloud.js` 调用的 Supabase API 时，记得同步更新 `fake-supabase.js`。

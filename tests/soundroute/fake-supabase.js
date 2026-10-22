@@ -5,7 +5,10 @@
 // Switch user in a test with: localStorage.setItem("fake-uid", "<id>").
 
 const KEY = "fake-supabase-db";
-const load = () => JSON.parse(localStorage.getItem(KEY) || '{"routes":[],"points":[],"saves":[],"files":{}}');
+const load = () => {
+  const db = JSON.parse(localStorage.getItem(KEY) || "{}");
+  return { routes: [], points: [], saves: [], reports: [], files: {}, ...db };
+};
 const save = (db) => localStorage.setItem(KEY, JSON.stringify(db));
 const ADJ = ["misty", "quiet", "amber", "lost", "slow"];
 const NOUN = ["parrot", "lamp", "gate", "bench", "river"];
@@ -20,7 +23,8 @@ const uid = () => {
 
 // Row level security, as in soundroute.sql
 const canReadRoute = (db, r) =>
-  r.owner === uid() || r.is_public || db.saves.some((s) => s.route_id === r.id && s.user_id === uid());
+  r.owner === uid() ||
+  (!r.hidden && (r.is_public || db.saves.some((s) => s.route_id === r.id && s.user_id === uid())));
 
 class Query {
   constructor(table) {
@@ -131,6 +135,17 @@ class Query {
       save(db);
       return { error: null };
     }
+    if (this.t === "reports" && this.op === "insert") {
+      for (const row of this.rows) {
+        const r = db.routes.find((x) => x.id === row.route_id);
+        if (!r || r.owner === me || !canReadRoute(db, r)) return { error: { message: "permission denied" } };
+        if (db.reports.some((x) => x.route_id === r.id && x.reporter === me)) return { error: { code: "23505", message: "duplicate key" } };
+        db.reports.push({ route_id: r.id, reporter: me, reason: row.reason });
+        if (db.reports.filter((x) => x.route_id === r.id).length >= 3) r.hidden = true;
+      }
+      save(db);
+      return { error: null };
+    }
     throw new Error(`fake supabase: unknown table ${this.t}`);
   }
 }
@@ -150,12 +165,30 @@ export function createClient() {
         error: null,
       }),
       signInAnonymously: async () => ({ data: { user: { id: uid(), is_anonymous: true } }, error: null }),
+      getUser: async () => {
+        const email = localStorage.getItem("fake-email-" + uid());
+        return { data: { user: { id: uid(), is_anonymous: !email, email } }, error: null };
+      },
+      updateUser: async ({ email }) => {
+        localStorage.setItem("fake-pending-email", email);
+        return { data: {}, error: null };
+      },
+      verifyOtp: async ({ email, token, type }) => {
+        if (token !== "123456") return { error: { message: "Token has expired or is invalid" } };
+        if (type === "email_change") localStorage.setItem("fake-email-" + uid(), email);
+        return { data: {}, error: null };
+      },
+      signInWithOtp: async () => ({ data: {}, error: null }),
+      signOut: async () => {
+        localStorage.removeItem("fake-uid");
+        return { error: null };
+      },
     },
     from: (t) => new Query(t),
     rpc: async (fn, args) => {
       const db = load();
       if (fn === "save_by_code") {
-        const r = db.routes.find((x) => x.share_code === String(args.code).trim().toLowerCase());
+        const r = db.routes.find((x) => x.share_code === String(args.code).trim().toLowerCase() && (!x.hidden || x.owner === uid()));
         if (!r) return { data: null, error: { message: "no walk with that code" } };
         if (!db.saves.some((s) => s.user_id === uid() && s.route_id === r.id)) {
           db.saves.push({ user_id: uid(), route_id: r.id, created_at: new Date().toISOString() });
@@ -165,7 +198,7 @@ export function createClient() {
       }
       if (fn === "get_plaza_cells") {
         const cells = new Map();
-        for (const r of db.routes.filter((x) => x.is_public && x.center_lat != null)) {
+        for (const r of db.routes.filter((x) => x.is_public && !x.hidden && x.center_lat != null)) {
           const lat = (Math.floor(r.center_lat / 0.0018) + 0.5) * 0.0018;
           const lng = (Math.floor(r.center_lng / 0.0029) + 0.5) * 0.0029;
           const k = `${lat},${lng}`;

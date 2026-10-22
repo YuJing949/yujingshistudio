@@ -5,12 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0b0c" />
     <title>SoundRoute</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SoundRoute" />
+    <meta name="description" content="Walk through sound: record your journey, hear the walks left before you." />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <main class="app" role="main">
       <header class="header">
-        <h1>SoundRoute</h1>
+        <div class="title-row">
+          <h1>SoundRoute</h1>
+          <button id="helpBtn" class="help-btn" type="button" aria-label="How SoundRoute works">?</button>
+        </div>
+        <div id="homeBanner" class="home-banner" hidden>
+          <span>Add SoundRoute to your Home Screen so your walks are kept.</span>
+          <button id="homeBannerHow" class="link-btn" type="button">How</button>
+          <button id="homeBannerClose" class="link-btn" type="button" aria-label="Dismiss">✕</button>
+        </div>
         <p class="subtitle">
           Walk through sound: record up to 5 minutes, hear the walks left before you.
         </p>
@@ -165,6 +181,37 @@
         <pre id="debugLogPre" class="debug-log" aria-live="polite"></pre>
       </details>
 
+      <section class="routes" aria-label="Your account">
+        <div class="routes-top">
+          <h2>Your account</h2>
+        </div>
+        <p id="accountStatus" class="hint">Anonymous: your walks are kept in this browser.</p>
+        <div id="accountAnon">
+          <p class="hint">
+            Link an email to keep your walks if this browser's data is cleared, and to use them on another device.
+          </p>
+          <form id="linkForm" class="code-form" autocomplete="on">
+            <input id="linkEmail" class="code-input" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email" required />
+            <button class="btn btn-ghost btn-small" type="submit">Keep my walks</button>
+          </form>
+          <details class="signin-other">
+            <summary>Already linked an email on another device?</summary>
+            <form id="signInForm" class="code-form" autocomplete="on">
+              <input id="signInEmail" class="code-input" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email to sign in" required />
+              <button class="btn btn-ghost btn-small" type="submit">Sign in</button>
+            </form>
+          </details>
+        </div>
+        <form id="otpForm" class="code-form" autocomplete="one-time-code" hidden>
+          <input id="otpInput" class="code-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="6-digit code" aria-label="Code from the email" />
+          <button class="btn btn-ghost btn-small" type="submit">Confirm</button>
+        </form>
+        <div id="accountLinked" hidden>
+          <button id="signOutBtn" class="btn btn-ghost btn-small" type="button">Sign out</button>
+        </div>
+        <div id="accountMsg" class="hint" aria-live="polite"></div>
+      </section>
+
       <section class="downloads" aria-label="Downloads">
         <div class="downloads-top">
           <h2>Downloads</h2>
@@ -215,6 +262,51 @@
         </section>
       </div>
     </main>
+
+    <div id="guide" class="guide" role="dialog" aria-modal="true" aria-labelledby="guideTitle" hidden>
+      <div class="guide-card">
+        <div class="guide-dots" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+
+        <div class="guide-step" data-step="0">
+          <h2 id="guideTitle">Hi, this is Parrot.</h2>
+          <p>Walk anywhere and record up to 5 minutes of your journey: your voice and the sounds around you.</p>
+          <p>Later, people who walk the same streets hear what you left behind, at the spot where you recorded it. Turn towards a sound to hear it more clearly.</p>
+          <p class="guide-note">Put on headphones. In the concept, the phone rides in a parrot on your shoulder.</p>
+        </div>
+
+        <div class="guide-step" data-step="1" hidden>
+          <h2>Three permissions</h2>
+          <p>Your phone asks for these when you tap Start New Walk:</p>
+          <ul class="guide-list">
+            <li><strong>Motion &amp; orientation</strong> — which way you face and when you take a step.</li>
+            <li><strong>Microphone</strong> — records your walk, surroundings included.</li>
+            <li><strong>Location</strong> — places each sound where it was recorded.</li>
+          </ul>
+          <p class="guide-note">Walks are private until you choose to share them, and the first 30 m of every walk are left out so your starting point stays yours.</p>
+        </div>
+
+        <div class="guide-step" data-step="2" hidden>
+          <h2>Keep your walks</h2>
+          <p id="guideHomeText">Add SoundRoute to your Home Screen: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>. Safari can clear a website's data after a week without a visit; Home Screen apps keep it.</p>
+          <p class="guide-note">You can also link an email under Your account to use your walks on another device.</p>
+        </div>
+
+        <div class="guide-step" data-step="3" hidden>
+          <h2>Find something to hear</h2>
+          <p>You only hear your own walks and walks you save. Save a few before you head out.</p>
+          <div class="guide-choices">
+            <button id="guidePlaza" class="btn btn-ghost btn-small" type="button">Explore the City plaza</button>
+            <button id="guideCode" class="btn btn-ghost btn-small" type="button">I have a share code</button>
+            <button id="guideRecord" class="btn btn-ghost btn-small" type="button">Record my own walk first</button>
+          </div>
+        </div>
+
+        <div class="guide-nav">
+          <button id="guideSkip" class="link-btn" type="button">Skip</button>
+          <button id="guideNext" class="btn btn-primary btn-small" type="button">Next</button>
+        </div>
+      </div>
+    </div>
 
     <script src="./app.js" type="module"></script>
   </body>

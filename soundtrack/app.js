@@ -98,6 +98,25 @@ const plazaSummary = document.getElementById("plazaSummary");
 const plazaList = document.getElementById("plazaList");
 const plazaListEmpty = document.getElementById("plazaListEmpty");
 const plazaListTitle = document.getElementById("plazaListTitle");
+const accountStatus = document.getElementById("accountStatus");
+const accountAnon = document.getElementById("accountAnon");
+const accountLinked = document.getElementById("accountLinked");
+const accountMsg = document.getElementById("accountMsg");
+const linkForm = document.getElementById("linkForm");
+const linkEmail = document.getElementById("linkEmail");
+const signInForm = document.getElementById("signInForm");
+const signInEmail = document.getElementById("signInEmail");
+const otpForm = document.getElementById("otpForm");
+const otpInput = document.getElementById("otpInput");
+const signOutBtn = document.getElementById("signOutBtn");
+const helpBtn = document.getElementById("helpBtn");
+const homeBanner = document.getElementById("homeBanner");
+const homeBannerHow = document.getElementById("homeBannerHow");
+const homeBannerClose = document.getElementById("homeBannerClose");
+const guide = document.getElementById("guide");
+const guideNext = document.getElementById("guideNext");
+const guideSkip = document.getElementById("guideSkip");
+const guideHomeText = document.getElementById("guideHomeText");
 const latLngText = document.getElementById("latLngText");
 
 // Position: GPS anchored, smoothed by steps + compass. Keeps one local frame
@@ -708,6 +727,14 @@ function renderNodesList() {
   li.appendChild(top);
   li.appendChild(grid);
 
+  if (isMine(walk) && walk.hidden) {
+    const note = document.createElement("p");
+    note.className = "hint";
+    note.textContent =
+      "Hidden after several reports: only you can see and hear this walk until it is reviewed.";
+    li.appendChild(note);
+  }
+
   if (walk.cloudError && walk.cloud !== "saved") {
     const note = document.createElement("p");
     note.className = "hint";
@@ -745,6 +772,7 @@ function renderNodesList() {
   }
   if (!isMine(walk) && savedWalks.includes(walk)) {
     action("Remove from saved", () => removeSaved(walk));
+    action("Report", () => reportWalk(walk));
   }
   if (actions.childElementCount) li.appendChild(actions);
 
@@ -1074,7 +1102,7 @@ function updateListenMode(currentX, currentY, heading) {
 
   const sources = getListenSourceRoutes();
   if (sources.length === 0) {
-    setListenWarn("Record or save at least one walk to use Listen Mode.");
+    setListenWarn("Record a walk, or save some in the City plaza, to use Listen Mode.");
     stopListeningPlayback("no walks to hear");
     listenNearest = { routeId: null, nodeId: null, distance: Infinity };
     setListenToggleUI();
@@ -1153,11 +1181,21 @@ function updateListenMode(currentX, currentY, heading) {
     d.walk && Number.isFinite(d.distance)
       ? `${Math.round(d.distance)} m${Number.isFinite(heading) ? ` · ${Math.round(d.angle)}°` : ""}`
       : "—";
+  let idleText = "No walk nearby";
+  if (!hearing && d.action === "none") {
+    let nearest = Infinity;
+    for (const w of sources) {
+      const n = nearestPoint(w, currentX, currentY);
+      if (n) nearest = Math.min(nearest, n.distance);
+    }
+    if (nearest > 300) idleText = "No saved walks near here — find some in the City plaza";
+    else if (Number.isFinite(nearest)) idleText = `Nearest walk ${Math.round(nearest)} m away`;
+  }
   playbackText.textContent = hearing
     ? `${hearing.name} · ${formatClock(listenPlayer.currentTime)} · volume ${Math.round((d.gain ?? 0) * 100)}%`
     : d.action === "stop"
       ? "Fading out"
-      : "No walk nearby";
+      : idleText;
   scheduleRouteRedraw();
 }
 
@@ -1855,7 +1893,7 @@ async function togglePublic(walk) {
   const makePublic = !walk.isPublic;
   if (makePublic) {
     const ok = window.confirm(
-      "Make this walk public?\n\nIt will light up the City plaza (placed to about 200 m) and anyone can save it and hear your recording where you walked.",
+      "Make this walk public?\n\nIt will light up the City plaza (placed to about 200 m) and anyone can save it and hear your recording where you walked. The first 30 m are left out, so your starting point stays private.",
     );
     if (!ok) return;
   }
@@ -1942,6 +1980,219 @@ async function removeSaved(walk) {
   if (selectedRoute === walk) selectedRoute = routes[0] || savedWalks[0] || null;
   renderAll();
 }
+
+const reportedIds = new Set();
+
+async function reportWalk(walk) {
+  let reason = null;
+  try {
+    reason = window.prompt(
+      `Report “${walk.name}”?\n\nWhat's wrong with it? (optional) After three reports a walk is hidden until it is reviewed.`,
+      "",
+    );
+  } catch {
+    return;
+  }
+  if (reason === null) return; // cancelled
+  try {
+    const cloud = await import("./cloud.js");
+    const result = await cloud.reportWalk(walk.id, reason.trim());
+    reportedIds.add(walk.id);
+    setStatus(result === "already" ? "You already reported this walk" : "Thanks — walk reported");
+    plazaSummary.textContent = result === "already" ? "You already reported this walk." : "Thanks — walk reported.";
+  } catch (e) {
+    setError(`Could not report: ${e?.message || e}`);
+    plazaSummary.textContent = `Could not report: ${e?.message || e}`;
+  }
+}
+
+// ─────────────────────────────────────────────
+// Your account: link an email, sign in elsewhere
+// ─────────────────────────────────────────────
+
+let otpPurpose = null; // "link" | "signin"
+let otpEmail = "";
+
+async function renderAccount() {
+  try {
+    const { linkedEmail } = await import("./supabase.js");
+    const email = await linkedEmail();
+    accountAnon.hidden = Boolean(email);
+    accountLinked.hidden = !email;
+    accountStatus.textContent = email
+      ? `Linked to ${email}. Sign in with this email on any device to get your walks.`
+      : "Anonymous: your walks are kept in this browser.";
+    if (email) homeBanner.hidden = true;
+  } catch {
+    accountStatus.textContent = "Not connected.";
+  }
+}
+
+function askForCode(purpose, email, sentMessage) {
+  otpPurpose = purpose;
+  otpEmail = email;
+  otpForm.hidden = false;
+  otpInput.value = "";
+  accountMsg.textContent = sentMessage;
+}
+
+linkForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = linkEmail.value.trim();
+  if (!email) return;
+  accountMsg.textContent = "Sending…";
+  try {
+    const sb = await import("./supabase.js");
+    await sb.linkEmail(email);
+    askForCode(
+      "link",
+      email,
+      `Check ${email}: tap the link, or type the code from the email here. Your walks stay the same.`,
+    );
+  } catch (err) {
+    accountMsg.textContent = err?.message || String(err);
+  }
+});
+
+signInForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = signInEmail.value.trim();
+  if (!email) return;
+  if (routes.length) {
+    const ok = window.confirm(
+      `Sign in as ${email}?\n\nThe ${routes.length} walk${routes.length === 1 ? "" : "s"} made anonymously on this device will stay with the anonymous identity and won't show after you sign in.`,
+    );
+    if (!ok) return;
+  }
+  accountMsg.textContent = "Sending…";
+  try {
+    const sb = await import("./supabase.js");
+    await sb.sendSignIn(email);
+    askForCode("signin", email, `Check ${email}: tap the link, or type the code from the email here.`);
+  } catch (err) {
+    accountMsg.textContent = err?.message || String(err);
+  }
+});
+
+otpForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const code = otpInput.value.trim();
+  if (!code || !otpPurpose) return;
+  accountMsg.textContent = "Checking…";
+  try {
+    const sb = await import("./supabase.js");
+    if (otpPurpose === "link") await sb.confirmLinkCode(otpEmail, code);
+    else await sb.confirmSignInCode(otpEmail, code);
+    otpForm.hidden = true;
+    accountMsg.textContent = otpPurpose === "link" ? "Email linked. Your walks are kept." : "Signed in. Loading your walks…";
+    if (otpPurpose === "signin") setTimeout(() => location.reload(), 600);
+    else renderAccount();
+  } catch (err) {
+    accountMsg.textContent = err?.message || String(err);
+  }
+});
+
+signOutBtn.addEventListener("click", async () => {
+  const ok = window.confirm("Sign out on this device?\n\nYour walks stay in your account; sign in again with your email to get them back.");
+  if (!ok) return;
+  try {
+    const sb = await import("./supabase.js");
+    await sb.signOut();
+  } catch (err) {
+    accountMsg.textContent = err?.message || String(err);
+    return;
+  }
+  location.reload();
+});
+
+// ─────────────────────────────────────────────
+// Home Screen + first-time guide
+// ─────────────────────────────────────────────
+
+const isStandalone = () =>
+  window.navigator.standalone === true || window.matchMedia?.("(display-mode: standalone)").matches;
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+function readFlag(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeFlag(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore: private mode
+  }
+}
+
+function setUpHomeScreen() {
+  // Ask the browser not to clear this site's storage (honoured on some browsers).
+  navigator.storage?.persist?.().catch(() => {});
+  if (isStandalone() || readFlag("soundroute-home-banner") === "dismissed") return;
+  homeBanner.hidden = false;
+  if (!isIOS()) {
+    guideHomeText.innerHTML =
+      "Add SoundRoute to your home screen from your browser's menu (<strong>Install app</strong> or <strong>Add to Home screen</strong>) so it opens like an app and keeps your walks.";
+  }
+}
+
+let guideStep = 0;
+const guideSteps = () => [...guide.querySelectorAll(".guide-step")];
+
+function showGuideStep(i) {
+  const steps = guideSteps();
+  // Skip the Home Screen step when already installed.
+  if (steps[i]?.dataset.step === "2" && isStandalone()) i += i > guideStep ? 1 : -1;
+  guideStep = Math.max(0, Math.min(steps.length - 1, i));
+  steps.forEach((el, k) => (el.hidden = k !== guideStep));
+  [...guide.querySelectorAll(".guide-dots span")].forEach((d, k) => d.classList.toggle("on", k === guideStep));
+  const last = guideStep === steps.length - 1;
+  guideNext.hidden = last;
+  guideSkip.textContent = last ? "Close" : "Skip";
+}
+
+function openGuide() {
+  guide.hidden = false;
+  showGuideStep(0);
+  guideNext.focus();
+}
+
+function closeGuide() {
+  guide.hidden = true;
+  writeFlag("soundroute-guide", "seen");
+}
+
+guideNext.addEventListener("click", () => showGuideStep(guideStep + 1));
+guideSkip.addEventListener("click", closeGuide);
+helpBtn.addEventListener("click", openGuide);
+document.getElementById("guidePlaza").addEventListener("click", () => {
+  closeGuide();
+  showView("plaza");
+});
+document.getElementById("guideCode").addEventListener("click", () => {
+  closeGuide();
+  showView("map");
+  codeInput.scrollIntoView({ block: "center" });
+  codeInput.focus();
+});
+document.getElementById("guideRecord").addEventListener("click", () => {
+  closeGuide();
+  startBtn.scrollIntoView({ block: "center" });
+});
+homeBannerHow.addEventListener("click", () => {
+  openGuide();
+  showGuideStep(2);
+});
+homeBannerClose.addEventListener("click", () => {
+  homeBanner.hidden = true;
+  writeFlag("soundroute-home-banner", "dismissed");
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !guide.hidden) closeGuide();
+});
 
 // ─────────────────────────────────────────────
 // City plaza
@@ -2094,6 +2345,20 @@ function renderPlazaList() {
     });
     buttons.appendChild(save);
 
+    if (!mine) {
+      const report = document.createElement("button");
+      report.type = "button";
+      report.className = "btn btn-ghost btn-small";
+      report.textContent = reportedIds.has(w.id) ? "Reported" : "Report";
+      report.disabled = reportedIds.has(w.id);
+      report.setAttribute("aria-label", `Report ${w.name}`);
+      report.addEventListener("click", async () => {
+        await reportWalk(w);
+        renderPlazaList();
+      });
+      buttons.appendChild(report);
+    }
+
     li.appendChild(text);
     li.appendChild(buttons);
     plazaList.appendChild(li);
@@ -2234,6 +2499,7 @@ async function connectCloud() {
     cloudText.textContent = `Connected · ${visibleWalks} walk${visibleWalks === 1 ? "" : "s"} visible`;
     debugLog("[cloud] database ok, visible walks:", visibleWalks);
     await loadMyWalks();
+    renderAccount();
   } catch (err) {
     const message = err?.message || String(err);
     if (accountText.textContent === "Connecting…") accountText.textContent = "Not connected";
@@ -2316,4 +2582,6 @@ loadPendingWalks().then(() => {
   renderAll();
 });
 connectCloud();
+setUpHomeScreen();
+if (readFlag("soundroute-guide") !== "seen") openGuide();
 

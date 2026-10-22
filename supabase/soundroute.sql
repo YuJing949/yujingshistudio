@@ -225,3 +225,149 @@ create policy "route-audio: read visible" on storage.objects for select to authe
     bucket_id = 'route-audio'
     and exists (select 1 from public.routes r where r.audio_path = storage.objects.name)
   );
+
+-- ═════════════════════════════════════════════
+-- Phase 7: reports, automatic hiding, daily limits
+-- ═════════════════════════════════════════════
+
+-- A walk reported by 3 different people is hidden from everyone but its
+-- owner until you review it (Table Editor → routes → hidden).
+alter table public.routes add column if not exists hidden boolean not null default false;
+
+create table if not exists public.reports (
+  route_id   uuid not null references public.routes (id) on delete cascade,
+  reporter   uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  reason     text check (reason is null or char_length(reason) <= 300),
+  created_at timestamptz not null default now(),
+  primary key (route_id, reporter)
+);
+alter table public.reports enable row level security;
+
+-- Anyone signed in can report a walk they can see (not their own).
+-- Nobody can read reports through the app; review them in the dashboard.
+drop policy if exists "reports: insert" on public.reports;
+create policy "reports: insert" on public.reports for insert to authenticated
+  with check (
+    reporter = auth.uid()
+    and exists (select 1 from public.routes r where r.id = route_id and r.owner <> auth.uid())
+  );
+
+create or replace function public.reports_after_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (select count(*) from public.reports where route_id = new.route_id) >= 3 then
+    update public.routes set hidden = true where id = new.route_id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists reports_hide on public.reports;
+create trigger reports_hide
+  after insert on public.reports
+  for each row execute function public.reports_after_insert();
+
+-- Daily limits: 30 walks and 20 reports per person per day.
+create or replace function public.limit_daily_routes()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (select count(*) from public.routes
+      where owner = new.owner and id <> new.id and created_at > now() - interval '1 day') >= 30 then
+    raise exception 'Daily limit reached: 30 walks a day. Try again tomorrow.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists routes_daily_limit on public.routes;
+create trigger routes_daily_limit
+  before insert on public.routes
+  for each row execute function public.limit_daily_routes();
+
+create or replace function public.limit_daily_reports()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (select count(*) from public.reports
+      where reporter = new.reporter and created_at > now() - interval '1 day') >= 20 then
+    raise exception 'Daily limit reached: 20 reports a day.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists reports_daily_limit on public.reports;
+create trigger reports_daily_limit
+  before insert on public.reports
+  for each row execute function public.limit_daily_reports();
+
+-- Hidden walks: only the owner still sees them.
+drop policy if exists "routes: read" on public.routes;
+create policy "routes: read" on public.routes for select to authenticated
+  using (
+    owner = auth.uid()
+    or (
+      not hidden
+      and (
+        is_public
+        or exists (select 1 from public.saves s where s.route_id = id and s.user_id = auth.uid())
+      )
+    )
+  );
+
+drop policy if exists "saves: insert public" on public.saves;
+create policy "saves: insert public" on public.saves for insert to authenticated
+  with check (
+    user_id = auth.uid()
+    and exists (select 1 from public.routes r where r.id = route_id and r.is_public and not r.hidden)
+  );
+
+create or replace function public.save_by_code(code text)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  found_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'not signed in';
+  end if;
+  select id into found_id from public.routes
+  where share_code = lower(trim(code)) and (not hidden or owner = auth.uid());
+  if found_id is null then
+    raise exception 'no walk with that code';
+  end if;
+  insert into public.saves (user_id, route_id) values (auth.uid(), found_id)
+  on conflict do nothing;
+  return found_id;
+end;
+$$;
+
+create or replace function public.get_plaza_cells()
+returns table (lat double precision, lng double precision, walks integer)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    (floor(center_lat / 0.0018) + 0.5) * 0.0018 as lat,
+    (floor(center_lng / 0.0029) + 0.5) * 0.0029 as lng,
+    count(*)::int as walks
+  from public.routes
+  where is_public and not hidden and center_lat is not null and center_lng is not null
+  group by 1, 2;
+$$;

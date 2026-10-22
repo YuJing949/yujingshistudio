@@ -21,6 +21,7 @@ os.makedirs(OUT, exist_ok=True)
 with sync_playwright() as p:
     b = p.chromium.launch(args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"])
     ctx = b.new_context(viewport={"width": 390, "height": 844}, geolocation={"latitude": START[0], "longitude": START[1], "accuracy": 8}, permissions=["geolocation", "microphone"])
+    ctx.add_init_script("try { localStorage.setItem('soundroute-guide','seen'); localStorage.setItem('soundroute-home-banner','dismissed'); } catch (e) {}")
     ctx.route("**/cdn.jsdelivr.net/**", lambda r: r.fulfill(status=200, content_type="application/javascript", body=FAKE))
     answers = []
     pg = ctx.new_page()
@@ -103,7 +104,9 @@ with sync_playwright() as p:
     pg.wait_for_timeout(1500)
     print("B7 good code:", pg.inner_text("#codeStatus"), "| saved list:", pg.inner_text("#savedList").replace("\n", " | "))
     heard = walk("B's first walk", 6, listen=True)
-    print("B8 heard while walking:", heard[1], "...", heard[-1])
+    log = pg.evaluate("document.getElementById('debugLogPre').textContent")
+    events = [l[15:] for l in log.split("\n") if "[listen] start" in l or "[listen] switch" in l]
+    print("B8 heard while walking:", events[:2] or heard[1:3])
     pg.click("#savedList li:has-text('Secret garden') button")
     pg.click("#nodesList button:has-text('Remove from saved')")
     pg.wait_for_timeout(1200)

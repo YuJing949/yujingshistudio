@@ -53,3 +53,52 @@ export async function checkDatabase() {
   }
   return count ?? 0;
 }
+
+// ─────────────────────────────────────────────
+// Keeping walks: link an email to the anonymous identity, sign in elsewhere
+// ─────────────────────────────────────────────
+
+const RETURN_URL = () => `${location.origin}${location.pathname}`;
+
+/** The visitor's email once linked and confirmed, else null. */
+export async function linkedEmail() {
+  const { data } = await supabase.auth.getUser();
+  const u = data?.user;
+  return u && !u.is_anonymous && u.email ? u.email : null;
+}
+
+/** Start linking an email to this (anonymous) visitor. Sends a link + code. */
+export async function linkEmail(email) {
+  const { error } = await supabase.auth.updateUser({ email: email.trim() }, { emailRedirectTo: RETURN_URL() });
+  if (error) throw error;
+}
+
+/** Finish linking with the 6-digit code from the email. */
+export async function confirmLinkCode(email, code) {
+  const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email_change" });
+  if (error) throw error;
+}
+
+/** On another device: email a sign-in link + code (only for linked emails). */
+export async function sendSignIn(email) {
+  const { error } = await supabase.auth.signInWithOtp({
+    email: email.trim(),
+    options: { shouldCreateUser: false, emailRedirectTo: RETURN_URL() },
+  });
+  if (error) {
+    if (/signups? not allowed|not found/i.test(error.message || "")) {
+      throw new Error("No account with that email. Link an email on the device that has your walks first.");
+    }
+    throw error;
+  }
+}
+
+export async function confirmSignInCode(email, code) {
+  const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
+  if (error) throw error;
+}
+
+export async function signOut() {
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+}

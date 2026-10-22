@@ -24,6 +24,29 @@ export function locatedNodes(walk) {
   return (walk.nodes || []).filter((n) => Number.isFinite(n.lat) && Number.isFinite(n.lng));
 }
 
+const PRIVATE_START_M = 30;
+
+function metresBetween(a, b) {
+  const D = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * D;
+  const dLng = (b.lng - a.lng) * D;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * D) * Math.cos(b.lat * D) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371008.8 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * Leave out the first stretch of a walk (30 m, or a third of a short walk) so
+ * where someone set off from — often home — is never stored or shared.
+ */
+export function withoutPrivateStart(points) {
+  if (points.length < 3) return points;
+  const along = [0];
+  for (let i = 1; i < points.length; i += 1) along.push(along[i - 1] + metresBetween(points[i - 1], points[i]));
+  const cut = Math.min(PRIVATE_START_M, along.at(-1) / 3);
+  const kept = points.filter((_, i) => along[i] >= cut);
+  return kept.length >= 2 ? kept : points.slice(-2);
+}
+
 /**
  * Uploads one walk: the route row, its audio file, then its track points.
  * Safe to retry: an already-created row or file is reused.
@@ -31,7 +54,7 @@ export function locatedNodes(walk) {
  */
 export async function uploadWalk(walk) {
   const user = await ensureVisitor();
-  const points = locatedNodes(walk);
+  const points = withoutPrivateStart(locatedNodes(walk));
   if (points.length === 0) throw new Error("This walk has no GPS positions, so it can't be placed on the map.");
 
   const centerLat = points.reduce((s, n) => s + n.lat, 0) / points.length;
@@ -91,7 +114,7 @@ export async function uploadWalk(walk) {
 }
 
 const WALK_COLUMNS =
-  "id, name, is_public, share_code, duration_s, audio_path, audio_mime, created_at, points(t, lat, lng, heading, accuracy)";
+  "id, name, is_public, hidden, share_code, duration_s, audio_path, audio_mime, created_at, points(t, lat, lng, heading, accuracy)";
 
 function toWalk(r) {
   return {
@@ -102,6 +125,7 @@ function toWalk(r) {
     audioMime: r.audio_mime,
     audioPath: r.audio_path,
     isPublic: r.is_public,
+    hidden: Boolean(r.hidden),
     shareCode: r.share_code,
     nodes: (r.points || [])
       .slice()
@@ -157,6 +181,19 @@ export async function updateWalk(routeId, changes) {
   if (typeof changes.isPublic === "boolean") patch.is_public = changes.isPublic;
   const { error } = await supabase.from("routes").update(patch).eq("id", routeId);
   if (error) throw error;
+}
+
+/** Report a walk someone else made. Three reports hide it for review. */
+export async function reportWalk(routeId, reason) {
+  const user = await ensureVisitor();
+  const { error } = await supabase
+    .from("reports")
+    .insert({ route_id: routeId, reporter: user.id, reason: reason ? String(reason).slice(0, 300) : null });
+  if (error) {
+    if (error.code === "23505") return "already";
+    throw error;
+  }
+  return "reported";
 }
 
 // ─────────────────────────────────────────────

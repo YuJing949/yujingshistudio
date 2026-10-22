@@ -18,6 +18,7 @@ def log(pg): return pg.evaluate("document.getElementById('debugLogPre').textCont
 with sync_playwright() as p:
     b=p.chromium.launch(args=["--use-fake-ui-for-media-stream","--use-fake-device-for-media-stream","--autoplay-policy=no-user-gesture-required"])
     ctx=b.new_context(viewport={'width':390,'height':844},geolocation={'latitude':51.48650,'longitude':-0.12350,'accuracy':8},permissions=['geolocation','microphone'])
+    ctx.add_init_script("try { localStorage.setItem('soundroute-guide','seen'); localStorage.setItem('soundroute-home-banner','dismissed'); } catch (e) {}")
     ctx.route("**/cdn.jsdelivr.net/**", lambda r: r.fulfill(status=200, content_type="application/javascript", body=FAKE))
     names=iter(["Test walk A","Test walk B","Offline walk C"])
     pg=ctx.new_page(); errs=[]
