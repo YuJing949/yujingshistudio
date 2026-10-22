@@ -90,18 +90,11 @@ export async function uploadWalk(walk) {
   return { shareCode: row.share_code, isPublic: row.is_public, audioPath };
 }
 
-/** The visitor's own walks, newest first, with their points. */
-export async function loadMyWalks() {
-  const user = await ensureVisitor();
-  const { data, error } = await supabase
-    .from("routes")
-    .select("id, name, is_public, share_code, duration_s, audio_path, audio_mime, created_at, points(t, lat, lng, heading, accuracy)")
-    .eq("owner", user.id)
-    .not("audio_path", "is", null)
-    .order("created_at", { ascending: false })
-    .order("t", { referencedTable: "points", ascending: true });
-  if (error) throw error;
-  return data.map((r) => ({
+const WALK_COLUMNS =
+  "id, name, is_public, share_code, duration_s, audio_path, audio_mime, created_at, points(t, lat, lng, heading, accuracy)";
+
+function toWalk(r) {
+  return {
     id: r.id,
     name: r.name,
     createdAt: Date.parse(r.created_at),
@@ -110,15 +103,112 @@ export async function loadMyWalks() {
     audioPath: r.audio_path,
     isPublic: r.is_public,
     shareCode: r.share_code,
-    nodes: r.points.map((p, i) => ({
-      id: i + 1,
-      t: p.t,
-      lat: p.lat,
-      lng: p.lng,
-      heading: p.heading,
-      uncertaintyM: p.accuracy,
-    })),
+    nodes: (r.points || [])
+      .slice()
+      .sort((a, b) => a.t - b.t)
+      .map((p, i) => ({ id: i + 1, t: p.t, lat: p.lat, lng: p.lng, heading: p.heading, uncertaintyM: p.accuracy })),
+  };
+}
+
+/** Walks the visitor saved from other people, newest save first. */
+export async function loadSavedWalks() {
+  const user = await ensureVisitor();
+  const { data, error } = await supabase
+    .from("saves")
+    .select(`created_at, routes(${WALK_COLUMNS})`)
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data
+    .filter((s) => s.routes && s.routes.audio_path)
+    .map((s) => ({ ...toWalk(s.routes), savedAt: Date.parse(s.created_at) }));
+}
+
+/** Save a public walk (from the plaza). */
+export async function saveWalk(routeId) {
+  const user = await ensureVisitor();
+  const { error } = await supabase.from("saves").insert({ user_id: user.id, route_id: routeId });
+  if (error && error.code !== "23505") throw error; // 23505: already saved
+}
+
+/** Save any walk, public or private, by its share code. Returns the walk id. */
+export async function saveByCode(code) {
+  await ensureVisitor();
+  const clean = String(code || "").trim().toLowerCase();
+  if (!clean) throw new Error("Type a share code first.");
+  const { data, error } = await supabase.rpc("save_by_code", { code: clean });
+  if (error) {
+    if (/no walk/i.test(error.message || "")) throw new Error(`No walk found for “${clean}”.`);
+    throw error;
+  }
+  return data;
+}
+
+export async function unsaveWalk(routeId) {
+  const user = await ensureVisitor();
+  const { error } = await supabase.from("saves").delete().eq("user_id", user.id).eq("route_id", routeId);
+  if (error) throw error;
+}
+
+/** Rename and/or make public/private one of your own walks. */
+export async function updateWalk(routeId, changes) {
+  const patch = {};
+  if (typeof changes.name === "string") patch.name = changes.name.trim().slice(0, 80) || "Untitled walk";
+  if (typeof changes.isPublic === "boolean") patch.is_public = changes.isPublic;
+  const { error } = await supabase.from("routes").update(patch).eq("id", routeId);
+  if (error) throw error;
+}
+
+// ─────────────────────────────────────────────
+// City plaza
+// ─────────────────────────────────────────────
+
+/** Same ~200 m grid as get_plaza_cells() in supabase/soundroute.sql. */
+export const PLAZA_CELL = { lat: 0.0018, lng: 0.0029 };
+
+/** [{ lat, lng, walks }] — public walks counted per grid cell. */
+export async function loadPlazaCells() {
+  const { data, error } = await supabase.rpc("get_plaza_cells");
+  if (error) throw error;
+  return (data || []).map((c) => ({ lat: Number(c.lat), lng: Number(c.lng), walks: Number(c.walks) }));
+}
+
+/** Public walks inside one grid cell (newest first), without their points. */
+export async function loadPlazaCellWalks(cell) {
+  const lat0 = cell.lat - PLAZA_CELL.lat / 2;
+  const lng0 = cell.lng - PLAZA_CELL.lng / 2;
+  const { data, error } = await supabase
+    .from("routes")
+    .select("id, name, duration_s, audio_path, created_at")
+    .eq("is_public", true)
+    .not("audio_path", "is", null)
+    .gte("center_lat", lat0)
+    .lt("center_lat", lat0 + PLAZA_CELL.lat)
+    .gte("center_lng", lng0)
+    .lt("center_lng", lng0 + PLAZA_CELL.lng)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw error;
+  return data.map((r) => ({
+    id: r.id,
+    name: r.name,
+    durationS: r.duration_s,
+    audioPath: r.audio_path,
+    createdAt: Date.parse(r.created_at),
   }));
+}
+
+/** The visitor's own walks, newest first, with their points. */
+export async function loadMyWalks() {
+  const user = await ensureVisitor();
+  const { data, error } = await supabase
+    .from("routes")
+    .select(WALK_COLUMNS)
+    .eq("owner", user.id)
+    .not("audio_path", "is", null)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data.map(toWalk);
 }
 
 /** Short-lived playable links for walks' audio files: Map(path → url). */

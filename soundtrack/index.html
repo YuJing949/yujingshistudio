@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0b0c" />
-    <title>SoundRoute (Prototype)</title>
+    <title>SoundRoute</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -14,7 +14,13 @@
         <p class="subtitle">
           Walk through sound: record up to 5 minutes, hear the walks left before you.
         </p>
+        <nav class="tabs" role="tablist" aria-label="Views">
+          <button id="tabMap" class="tab selected" type="button" role="tab" aria-selected="true">My map</button>
+          <button id="tabPlaza" class="tab" type="button" role="tab" aria-selected="false">City plaza</button>
+        </nav>
       </header>
+
+      <div id="mapView">
 
       <section class="routes" aria-label="Routes">
         <div class="routes-top">
@@ -25,6 +31,21 @@
         </div>
         <div id="routesEmpty" class="empty">No walks yet.</div>
         <ol id="routesList" class="routes-list"></ol>
+      </section>
+
+      <section class="routes" aria-label="Saved walks">
+        <div class="routes-top">
+          <h2>Saved walks</h2>
+        </div>
+        <p class="hint">Walks you save from other people play while you walk, alongside your own.</p>
+        <form id="codeForm" class="code-form" autocomplete="off">
+          <input id="codeInput" class="code-input" type="text" inputmode="text" autocapitalize="none"
+            spellcheck="false" placeholder="Share code, e.g. misty-parrot-0417" aria-label="Share code" />
+          <button id="codeBtn" class="btn btn-ghost btn-small" type="submit">Save</button>
+        </form>
+        <div id="codeStatus" class="hint" aria-live="polite"></div>
+        <div id="savedEmpty" class="empty">No saved walks yet. Find some in the City plaza, or enter a share code.</div>
+        <ol id="savedList" class="routes-list"></ol>
       </section>
 
       <section class="listen" aria-label="Listen Mode">
@@ -164,6 +185,35 @@
           Tip: keep the phone in a consistent orientation while walking for better heading.
         </p>
       </footer>
+
+      </div>
+
+      <div id="plazaView" hidden>
+        <section class="plaza" aria-label="City plaza">
+          <div class="plaza-top">
+            <div>
+              <h2>City plaza</h2>
+              <div id="plazaSummary" class="hint">Loading…</div>
+            </div>
+            <div class="plaza-actions">
+              <button id="plazaNearBtn" class="btn btn-ghost btn-small" type="button">Near me</button>
+              <button id="plazaAllBtn" class="btn btn-ghost btn-small" type="button">All</button>
+            </div>
+          </div>
+          <canvas id="plazaCanvas" class="plaza-canvas" aria-label="Map of public walks as lights"></canvas>
+          <p class="hint">
+            Each light is a public walk, placed roughly (to about 200 m). Brighter means more walks.
+            Drag to move, pinch to zoom, tap a light to see its walks.
+          </p>
+        </section>
+        <section class="routes" aria-label="Walks here">
+          <div class="routes-top">
+            <h2 id="plazaListTitle">Walks here</h2>
+          </div>
+          <div id="plazaListEmpty" class="empty">Tap a light to see the walks there.</div>
+          <ol id="plazaList" class="routes-list"></ol>
+        </section>
+      </div>
     </main>
 
     <script src="./app.js" type="module"></script>

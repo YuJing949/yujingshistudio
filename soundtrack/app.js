@@ -7,6 +7,7 @@
 import { LocationFusion } from "./location.js";
 import { savePendingWalk, listPendingWalks, deletePendingWalk } from "./localstore.js";
 import { ListenPlayer, LISTEN_CONFIG, decideListen, nearestPoint } from "./listen.js";
+import { PlazaMap } from "./plaza.js";
 
 /* eslint-disable no-console */
 
@@ -43,7 +44,8 @@ const PREFETCH_DISTANCE_M = 120; // download walks' audio when this close
 // ]
 //
 // During recording we keep a separate `currentRecordingRoute` until the walk ends.
-let routes = [];
+let routes = []; // my walks
+let savedWalks = []; // walks saved from other people (play while walking too)
 let currentRecordingRoute = null;
 let selectedRoute = null;
 let routeCounter = 0;
@@ -81,6 +83,21 @@ const downloadsEmpty = document.getElementById("downloadsEmpty");
 const downloadStatus = document.getElementById("downloadStatus");
 
 const gpsText = document.getElementById("gpsText");
+const savedList = document.getElementById("savedList");
+const savedEmpty = document.getElementById("savedEmpty");
+const codeForm = document.getElementById("codeForm");
+const codeInput = document.getElementById("codeInput");
+const codeBtn = document.getElementById("codeBtn");
+const codeStatus = document.getElementById("codeStatus");
+const tabMap = document.getElementById("tabMap");
+const tabPlaza = document.getElementById("tabPlaza");
+const mapView = document.getElementById("mapView");
+const plazaView = document.getElementById("plazaView");
+const plazaCanvas = document.getElementById("plazaCanvas");
+const plazaSummary = document.getElementById("plazaSummary");
+const plazaList = document.getElementById("plazaList");
+const plazaListEmpty = document.getElementById("plazaListEmpty");
+const plazaListTitle = document.getElementById("plazaListTitle");
 const latLngText = document.getElementById("latLngText");
 
 // Position: GPS anchored, smoothed by steps + compass. Keeps one local frame
@@ -212,7 +229,15 @@ function getViewingNodes() {
 }
 
 function getRouteById(id) {
-  return routes.find((r) => r.id === id) || null;
+  return routes.find((r) => r.id === id) || savedWalks.find((r) => r.id === id) || null;
+}
+
+function isMine(walk) {
+  return Boolean(walk) && routes.includes(walk);
+}
+
+function allWalks() {
+  return routes.concat(savedWalks);
 }
 
 function setListenWarn(message) {
@@ -292,7 +317,7 @@ function syncPositionFromFusion() {
 // frame) so drawing and listening can use them like walks recorded here.
 let displayFrame = null;
 function projectWalks() {
-  for (const r of routes) {
+  for (const r of allWalks()) {
     for (const n of r.nodes) {
       if (!Number.isFinite(n.lat) || !Number.isFinite(n.lng)) continue;
       let p = fusion.hasOrigin ? fusion.toLocal(n.lat, n.lng) : null;
@@ -534,10 +559,10 @@ function drawRoutePreview() {
   if (isRecording) ptsPrimary.push({ x: xMeters, y: yMeters, id: -1, kind: "live" });
 
   // All saved historical routes (faint) while recording + Listen Mode — not currentRecordingRoute.
-  const drawHistoricalListen = listenModeEnabled && routes.length > 0;
+  const drawHistoricalListen = listenModeEnabled && allWalks().length > 0;
   const ptsHistorical = [];
   if (drawHistoricalListen) {
-    for (const r of routes) {
+    for (const r of allWalks()) {
       if (r === getViewingRoute()) continue;
       for (const n of r.nodes) {
         if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
@@ -592,7 +617,7 @@ function drawRoutePreview() {
 
   // Historical routes (each polyline from origin) under the live walk.
   if (drawHistoricalListen) {
-    for (const r of routes) {
+    for (const r of allWalks()) {
       if (!r.nodes.length || r === getViewingRoute()) continue;
       const ptsH = r.nodes
         .filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y))
@@ -676,7 +701,9 @@ function renderNodesList() {
   const located = walk.nodes.filter((n) => Number.isFinite(n.lat)).length;
   grid.appendChild(kv("Length", recording ? "Recording…" : formatClock(walk.durationS || 0)));
   grid.appendChild(kv("Track points", `${walk.nodes.length} (${located} with GPS)`));
-  grid.appendChild(kv("Cloud", recording ? "—" : cloudStatusLabel(walk)));
+  grid.appendChild(
+    kv("Cloud", recording ? "—" : isMine(walk) ? cloudStatusLabel(walk) : "Saved from someone else"),
+  );
   grid.appendChild(kv("Share code", walk.shareCode || "—"));
   li.appendChild(top);
   li.appendChild(grid);
@@ -696,55 +723,85 @@ function renderNodesList() {
     li.appendChild(audio);
   }
 
+  const actions = document.createElement("div");
+  actions.className = "walk-actions";
+  const action = (label, onClick) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn btn-ghost btn-small";
+    b.textContent = label;
+    b.addEventListener("click", onClick);
+    actions.appendChild(b);
+    return b;
+  };
+
   if (!recording && (walk.cloud === "failed" || walk.cloud === "pending")) {
-    const retry = document.createElement("button");
-    retry.type = "button";
-    retry.className = "btn btn-ghost";
-    retry.textContent = "Upload now";
-    retry.addEventListener("click", () => uploadWalkNow(walk));
-    li.appendChild(retry);
+    action("Upload now", () => uploadWalkNow(walk));
   }
+  if (!recording && isMine(walk) && walk.cloud === "saved") {
+    action("Rename", () => renameWalk(walk));
+    action(walk.isPublic ? "Make private" : "Make public", () => togglePublic(walk));
+    if (walk.shareCode) action("Copy share code", () => copyShareCode(walk));
+  }
+  if (!isMine(walk) && savedWalks.includes(walk)) {
+    action("Remove from saved", () => removeSaved(walk));
+  }
+  if (actions.childElementCount) li.appendChild(actions);
 
   nodesList.appendChild(li);
 }
 
-function renderRoutesPanel() {
-  routesList.innerHTML = "";
-  routesEmpty.hidden = routes.length !== 0;
-
-  for (const route of routes) {
+function renderWalkList(listEl, emptyEl, walks, subtitle) {
+  listEl.innerHTML = "";
+  emptyEl.hidden = walks.length !== 0;
+  for (const walk of walks) {
     const li = document.createElement("li");
-    li.className = "route" + (selectedRoute?.id === route.id ? " selected" : "");
+    li.className = "route" + (selectedRoute?.id === walk.id ? " selected" : "");
 
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "route-btn";
     btn.addEventListener("click", () => {
-      if (isRecording) return; // keep viewing in recording mode
-      selectedRoute = route;
-      console.log("[route] selected", route.name);
-      updateMetricsUI();
-      renderRoutesPanel();
-      renderNodesList();
-      drawRoutePreview();
-      updateDeleteRouteButton();
+      if (isRecording) return; // keep viewing the walk being recorded
+      selectedRoute = walk;
+      renderAll();
     });
 
     const title = document.createElement("div");
     title.className = "route-title";
-    title.textContent = route.name;
+    title.textContent = walk.name;
+    if (isMine(walk) && walk.isPublic) {
+      const badge = document.createElement("span");
+      badge.className = "badge public";
+      badge.textContent = "Public";
+      title.appendChild(badge);
+    }
 
     const sub = document.createElement("div");
     sub.className = "route-sub";
-    sub.textContent = `${formatClock(route.durationS || 0)} · ${cloudStatusLabel(route)} · ${new Date(route.createdAt).toLocaleDateString()}`;
+    sub.textContent = subtitle(walk);
 
     btn.appendChild(title);
     btn.appendChild(sub);
     li.appendChild(btn);
-    routesList.appendChild(li);
+    listEl.appendChild(li);
   }
 }
 
+function renderRoutesPanel() {
+  renderWalkList(
+    routesList,
+    routesEmpty,
+    routes,
+    (r) => `${formatClock(r.durationS || 0)} · ${cloudStatusLabel(r)} · ${new Date(r.createdAt).toLocaleDateString()}`,
+  );
+  renderWalkList(
+    savedList,
+    savedEmpty,
+    savedWalks,
+    (r) => `${formatClock(r.durationS || 0)} · recorded ${new Date(r.createdAt).toLocaleDateString()}`,
+  );
+}
 
 function sanitizeFilenamePart(value) {
   return String(value || "route")
@@ -944,12 +1001,12 @@ function renderDownloadsPanel() {
 }
 
 function updateDeleteRouteButton() {
-  // Only allow deleting when not recording, and a route is selected.
-  deleteRouteBtn.disabled = isRecording || !selectedRoute;
+  // Only your own walks can be deleted; saved ones are removed from the walk panel.
+  deleteRouteBtn.disabled = isRecording || !selectedRoute || !isMine(selectedRoute);
 }
 
 function getListenSourceRoutes() {
-  return routes.filter(
+  return allWalks().filter(
     (r) => r.audioUrl && r.nodes?.some((n) => Number.isFinite(n.x) && Number.isFinite(n.y)),
   );
 }
@@ -1701,7 +1758,7 @@ function cloudStatusLabel(walk) {
 
 async function deleteSelectedRoute() {
   if (isRecording) return;
-  if (!selectedRoute) return;
+  if (!selectedRoute || !isMine(selectedRoute)) return;
   const walk = selectedRoute;
 
   if (walk.cloud === "uploading") {
@@ -1747,8 +1804,9 @@ async function deleteSelectedRoute() {
 
   const deletedRouteId = walk.id;
   routes = routes.filter((r) => r.id !== deletedRouteId);
+  if (walk.isPublic) plazaStale = true;
   debugLog("[route] deleted", walk.name);
-  selectedRoute = routes[0] || null;
+  selectedRoute = routes[0] || savedWalks[0] || null;
 
   if (listenModeEnabled && currentlyPlayingRouteId === deletedRouteId) {
     stopListeningPlayback("playing route deleted");
@@ -1767,6 +1825,323 @@ async function deleteSelectedRoute() {
     updateListenMode(xMeters, yMeters, headingDeg);
   }
 }
+
+// ─────────────────────────────────────────────
+// My map: share, rename, save, unsave
+// ─────────────────────────────────────────────
+
+async function renameWalk(walk) {
+  let name = null;
+  try {
+    name = window.prompt("Rename this walk", walk.name);
+  } catch {
+    return;
+  }
+  if (name == null) return;
+  name = name.trim().slice(0, 80);
+  if (!name || name === walk.name) return;
+  try {
+    const cloud = await import("./cloud.js");
+    await cloud.updateWalk(walk.id, { name });
+    walk.name = name;
+    setError("");
+    renderAll();
+  } catch (e) {
+    setError(`Could not rename: ${e?.message || e}`);
+  }
+}
+
+async function togglePublic(walk) {
+  const makePublic = !walk.isPublic;
+  if (makePublic) {
+    const ok = window.confirm(
+      "Make this walk public?\n\nIt will light up the City plaza (placed to about 200 m) and anyone can save it and hear your recording where you walked.",
+    );
+    if (!ok) return;
+  }
+  try {
+    const cloud = await import("./cloud.js");
+    await cloud.updateWalk(walk.id, { isPublic: makePublic });
+    walk.isPublic = makePublic;
+    setError("");
+    setStatus(makePublic ? "Walk is public" : "Walk is private");
+    plazaStale = true;
+    renderAll();
+  } catch (e) {
+    setError(`Could not change this walk: ${e?.message || e}`);
+  }
+}
+
+async function copyShareCode(walk) {
+  const code = walk.shareCode;
+  try {
+    await navigator.clipboard.writeText(code);
+    setStatus(`Copied share code: ${code}`);
+  } catch {
+    // Clipboard blocked: show it so it can be copied by hand.
+    window.prompt("Share code (copy it):", code);
+  }
+}
+
+/** Load one walk (with points and audio) into Saved walks after saving it. */
+async function refreshSavedWalks() {
+  const cloud = await import("./cloud.js");
+  const saved = await cloud.loadSavedWalks();
+  const myIds = new Set(routes.map((r) => r.id));
+  const keep = new Map(savedWalks.map((w) => [w.id, w]));
+  savedWalks = saved
+    .filter((w) => !myIds.has(w.id))
+    .map((w) => {
+      const old = keep.get(w.id);
+      return old && old.audioUrl ? { ...w, audioUrl: old.audioUrl, fromCloud: true } : { ...w, fromCloud: true };
+    });
+  await refreshAudioUrls(cloud);
+  projectWalks();
+  renderAll();
+  if (listenModeEnabled) {
+    lastDirectionUpdateMs = 0;
+    updateListenMode(xMeters, yMeters, headingDeg);
+  }
+}
+
+async function saveByCode(code) {
+  codeStatus.textContent = "Saving…";
+  codeBtn.disabled = true;
+  try {
+    const cloud = await import("./cloud.js");
+    const id = await cloud.saveByCode(code);
+    if (routes.some((r) => r.id === id)) {
+      codeStatus.textContent = "That's one of your own walks — it already plays while you walk.";
+      return;
+    }
+    await refreshSavedWalks();
+    const walk = savedWalks.find((w) => w.id === id);
+    if (walk && !isRecording) selectedRoute = walk;
+    codeInput.value = "";
+    codeStatus.textContent = walk ? `Saved “${walk.name}”.` : "Saved.";
+    renderAll();
+  } catch (e) {
+    codeStatus.textContent = e?.message || String(e);
+  } finally {
+    codeBtn.disabled = false;
+  }
+}
+
+async function removeSaved(walk) {
+  const ok = window.confirm(`Remove “${walk.name}” from your saved walks?`);
+  if (!ok) return;
+  try {
+    const cloud = await import("./cloud.js");
+    await cloud.unsaveWalk(walk.id);
+  } catch (e) {
+    setError(`Could not remove: ${e?.message || e}`);
+    return;
+  }
+  savedWalks = savedWalks.filter((w) => w.id !== walk.id);
+  if (listenPlayer.playingWalkId === walk.id) stopListeningPlayback("walk removed");
+  if (selectedRoute === walk) selectedRoute = routes[0] || savedWalks[0] || null;
+  renderAll();
+}
+
+// ─────────────────────────────────────────────
+// City plaza
+// ─────────────────────────────────────────────
+
+let plaza = null;
+let plazaStale = true;
+let plazaCellWalks = [];
+const previewAudio = new Audio();
+previewAudio.preload = "none";
+let previewWalkId = null;
+let previewTimer = null;
+const PREVIEW_SECONDS = 20;
+
+function showView(name) {
+  const plazaOn = name === "plaza";
+  mapView.hidden = plazaOn;
+  plazaView.hidden = !plazaOn;
+  tabMap.classList.toggle("selected", !plazaOn);
+  tabPlaza.classList.toggle("selected", plazaOn);
+  tabMap.setAttribute("aria-selected", String(!plazaOn));
+  tabPlaza.setAttribute("aria-selected", String(plazaOn));
+  if (plazaOn) openPlaza();
+  else stopPreview();
+}
+
+function myPositionLatLng() {
+  return fusion.hasOrigin ? fusion.toLatLng(xMeters, yMeters) : null;
+}
+
+async function openPlaza() {
+  if (!plaza) {
+    plaza = new PlazaMap(plazaCanvas, { onSelect: (cell) => showPlazaCell(cell) });
+  }
+  plaza.resize();
+  plaza.setYou(myPositionLatLng());
+  if (!plazaStale) return;
+  plazaSummary.textContent = "Loading…";
+  try {
+    const cloud = await import("./cloud.js");
+    const cells = await cloud.loadPlazaCells();
+    plazaStale = false;
+    plaza.setCells(cells);
+    const walks = cells.reduce((n, c) => n + c.walks, 0);
+    plazaSummary.textContent = walks
+      ? `${walks} public walk${walks === 1 ? "" : "s"} in ${cells.length} place${cells.length === 1 ? "" : "s"}`
+      : "No public walks yet. Make one of yours public to light up the plaza.";
+    plaza.fit();
+    debugLog("[plaza] loaded", { cells: cells.length, walks });
+  } catch (e) {
+    plazaSummary.textContent = `Could not load the plaza: ${e?.message || e}`;
+  }
+}
+
+function plazaNearMe() {
+  const here = myPositionLatLng();
+  if (here) {
+    plaza.setYou(here);
+    plaza.centreOn(here);
+    return;
+  }
+  if (!("geolocation" in navigator)) {
+    plazaSummary.textContent = "This browser can't share your location.";
+    return;
+  }
+  plazaSummary.textContent = "Finding you…";
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const ll = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      plaza.setYou(ll);
+      plaza.centreOn(ll);
+      plazaSummary.textContent = "Centred on you.";
+    },
+    (err) => {
+      plazaSummary.textContent = err?.code === 1 ? "Location permission denied." : "Couldn't find your location.";
+    },
+    { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 },
+  );
+}
+
+async function showPlazaCell(cell) {
+  stopPreview();
+  plazaList.innerHTML = "";
+  plazaCellWalks = [];
+  if (!cell) {
+    plazaListTitle.textContent = "Walks here";
+    plazaListEmpty.textContent = "Tap a light to see the walks there.";
+    plazaListEmpty.hidden = false;
+    return;
+  }
+  plazaListTitle.textContent = `Walks here (${cell.walks})`;
+  plazaListEmpty.textContent = "Loading…";
+  plazaListEmpty.hidden = false;
+  try {
+    const cloud = await import("./cloud.js");
+    plazaCellWalks = await cloud.loadPlazaCellWalks(cell);
+    renderPlazaList();
+  } catch (e) {
+    plazaListEmpty.textContent = `Could not load walks: ${e?.message || e}`;
+  }
+}
+
+function renderPlazaList() {
+  plazaList.innerHTML = "";
+  plazaListEmpty.hidden = plazaCellWalks.length !== 0;
+  if (!plazaCellWalks.length) plazaListEmpty.textContent = "No walks here any more.";
+  for (const w of plazaCellWalks) {
+    const li = document.createElement("li");
+    li.className = "route plaza-walk";
+
+    const text = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "route-title";
+    title.textContent = w.name;
+    const sub = document.createElement("div");
+    sub.className = "route-sub";
+    sub.textContent = `${formatClock(w.durationS || 0)} · ${new Date(w.createdAt).toLocaleDateString()}`;
+    text.appendChild(title);
+    text.appendChild(sub);
+
+    const buttons = document.createElement("div");
+    buttons.className = "plaza-walk-actions";
+    const listen = document.createElement("button");
+    listen.type = "button";
+    listen.className = "btn btn-ghost btn-small";
+    listen.textContent = previewWalkId === w.id ? "Stop" : "Listen";
+    listen.addEventListener("click", () => togglePreview(w));
+    buttons.appendChild(listen);
+
+    const mine = routes.some((r) => r.id === w.id);
+    const saved = savedWalks.some((r) => r.id === w.id);
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn btn-ghost btn-small";
+    save.textContent = mine ? "Yours" : saved ? "Saved" : "Save";
+    save.disabled = mine || saved;
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      save.textContent = "Saving…";
+      try {
+        const cloud = await import("./cloud.js");
+        await cloud.saveWalk(w.id);
+        await refreshSavedWalks();
+        renderPlazaList();
+      } catch (e) {
+        save.disabled = false;
+        save.textContent = "Save";
+        plazaSummary.textContent = `Could not save: ${e?.message || e}`;
+      }
+    });
+    buttons.appendChild(save);
+
+    li.appendChild(text);
+    li.appendChild(buttons);
+    plazaList.appendChild(li);
+  }
+}
+
+async function togglePreview(w) {
+  if (previewWalkId === w.id) {
+    stopPreview();
+    renderPlazaList();
+    return;
+  }
+  stopPreview();
+  previewWalkId = w.id;
+  renderPlazaList();
+  try {
+    const cloud = await import("./cloud.js");
+    const urls = await cloud.signAudioUrls([w.audioPath]);
+    const url = urls.get(w.audioPath);
+    if (!url || previewWalkId !== w.id) return;
+    previewAudio.src = url;
+    await previewAudio.play();
+    previewTimer = setTimeout(() => {
+      stopPreview();
+      renderPlazaList();
+    }, PREVIEW_SECONDS * 1000);
+  } catch (e) {
+    debugLog("[plaza] preview failed", e?.message || e);
+    stopPreview();
+    renderPlazaList();
+  }
+}
+
+function stopPreview() {
+  clearTimeout(previewTimer);
+  previewTimer = null;
+  previewWalkId = null;
+  try {
+    previewAudio.pause();
+  } catch {
+    // ignore
+  }
+}
+
+previewAudio.addEventListener("ended", () => {
+  stopPreview();
+  renderPlazaList();
+});
 
 function renderAll() {
   renderRoutesPanel();
@@ -1814,6 +2189,15 @@ listenToggleBtn.addEventListener("click", () => {
   lastDirectionUpdateMs = 0;
   updateListenMode(xMeters, yMeters, headingDeg);
 });
+
+codeForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  saveByCode(codeInput.value);
+});
+tabMap.addEventListener("click", () => showView("map"));
+tabPlaza.addEventListener("click", () => showView("plaza"));
+document.getElementById("plazaNearBtn").addEventListener("click", () => plazaNearMe());
+document.getElementById("plazaAllBtn").addEventListener("click", () => plaza?.fit());
 
 downloadAllAudioBtn.addEventListener("click", () => {
   downloadAllNodeAudio();
@@ -1879,7 +2263,7 @@ async function loadPendingWalks() {
 
 let audioUrlsSignedAt = 0;
 async function refreshAudioUrls(cloud) {
-  const saved = routes.filter((r) => r.cloud === "saved" && r.audioPath);
+  const saved = allWalks().filter((r) => (r.cloud === "saved" || !isMine(r)) && r.audioPath);
   if (!saved.length) return;
   const urls = await cloud.signAudioUrls(saved.map((r) => r.audioPath));
   for (const r of saved) {
@@ -1897,10 +2281,18 @@ async function loadMyWalks() {
     if (routes.some((r) => r.id === w.id)) continue;
     routes.push({ ...w, cloud: "saved", fromCloud: true });
   }
+  try {
+    const saved = await cloud.loadSavedWalks();
+    const myIds = new Set(routes.map((r) => r.id));
+    savedWalks = saved.filter((w) => !myIds.has(w.id)).map((w) => ({ ...w, fromCloud: true }));
+    debugLog("[cloud] saved walks loaded:", savedWalks.length);
+  } catch (e) {
+    debugLog("[cloud] could not load saved walks", e?.message || e);
+  }
   await refreshAudioUrls(cloud);
   routes.sort((a, b) => b.createdAt - a.createdAt);
   projectWalks();
-  if (!selectedRoute && !currentRecordingRoute) selectedRoute = routes[0] || null;
+  if (!selectedRoute && !currentRecordingRoute) selectedRoute = routes[0] || savedWalks[0] || null;
   renderAll();
   debugLog("[cloud] my walks loaded:", mine.length);
   if (listenModeEnabled) {

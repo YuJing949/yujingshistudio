@@ -499,3 +499,144 @@ body {
   line-height: 1.35;
 }
 
+
+/* ── Tabs ─────────────────────────────── */
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  margin: 0 0 12px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.tab {
+  min-height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 750;
+  font-size: 15px;
+}
+
+.tab.selected {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--text);
+}
+
+/* ── Saved walks / share code ─────────── */
+.code-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.code-input {
+  min-height: 44px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* 16px stops iPhone zooming in on focus */
+}
+
+.code-input:focus {
+  outline: 2px solid rgba(10, 132, 255, 0.7);
+  outline-offset: 1px;
+}
+
+/* ── Walk panel actions ───────────────── */
+.walk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.walk-actions .btn {
+  flex: 1 1 auto;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 750;
+  vertical-align: 1px;
+  color: var(--muted);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.badge.public {
+  color: #ffd27a;
+  border-color: rgba(255, 210, 122, 0.45);
+}
+
+/* ── City plaza ───────────────────────── */
+.plaza {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  margin: 0 0 12px;
+}
+
+.plaza-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0 10px;
+}
+
+.plaza-top h2 {
+  margin: 0 0 2px;
+  font-size: 16px;
+}
+
+.plaza-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.plaza-canvas {
+  display: block;
+  width: 100%;
+  height: min(62vh, 460px);
+  border-radius: 10px;
+  background: #04050a;
+  touch-action: none;
+  cursor: grab;
+}
+
+.plaza-walk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plaza-walk-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Compact buttons for lists and panels (.btn above sets a large size). */
+.btn.btn-small {
+  font-size: 14px;
+  font-weight: 750;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 10px;
+}

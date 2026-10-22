@@ -50,6 +50,7 @@
 | `localstore.js` | IndexedDB：上传完成前把旅程存在手机上 |
 | `supabase.js` | Supabase 客户端（publishable key，可以放在前端）、`ensureVisitor()` 匿名登录、`checkDatabase()` |
 | `cloud.js` | `uploadWalk` / `loadMyWalks` / `signAudioUrls` / `deleteWalk` |
+| `plaza.js` | `PlazaMap`：城市广场画布。黑底上的暖色光点（Web Mercator 投影，无底图），拖动、双指缩放、滚轮缩放、点击选中光点；比例尺；“你在这里”标记 |
 | `listen.js` | 收听：`decideListen()` 纯决策（开始、保持、重新对齐、切换、停止），`ListenPlayer` 双播放器，通过 Web Audio 增益节点控制音量和交叉淡化（iPhone 会忽略 `<audio>.volume`），并预先缓存附近录音；参数在 `LISTEN_CONFIG` |
 | `wrangler.toml` | Cloudflare 静态资源部署（Worker 名 `soundroute`） |
 
@@ -69,7 +70,7 @@
   nodes: [ { id, t /* 录音秒数 */, timestamp, stepCount, heading, x, y, lat, lng, uncertaintyM } ]
 }
 ```
-- `routes`：我的旅程（云端载入的、本地待上传的、本次录的）。`currentRecordingRoute`：正在录的旅程。
+- `routes`：我的旅程（云端载入的、本地待上传的、本次录的）。`savedWalks`：收藏的别人的旅程。`allWalks()` = 两者合并，收听和地图叠加都用它。`currentRecordingRoute`：正在录的旅程。
 - `nodes` 就是每 2 秒一个的轨迹点。`x`/`y` 是本次会话坐标系里的米；云端载入的旅程由 `projectWalks()` 从经纬度换算出 x/y。
 - 收听逻辑：`updateListenMode()` 每 300 毫秒调用一次 `decideListen()`。走近旅程（20 米内、大致在前方）就从对应秒数淡入；沿路线走则连续播放；播放进度和所在位置相差超过 12 秒时重新对齐；另一条旅程明显更近（差 8 米以上）时交叉淡化切换；离开 28 米后淡出；播完的旅程休息 45 秒。音量由距离和朝向共同决定。
 
@@ -104,8 +105,8 @@
 | 2 定位 | `location.js` 融合 GPS 与步数、指南针；节点存经纬度；面板显示 GPS 精度 | 代码完成；模拟中位误差约 3 米，**未实地测试** |
 | 3 记录与删除 | 连续录音（最长 5 分钟）、2 秒轨迹点、本地先存再上传、刷新后保留、命名、分享码、删除 | 代码完成；模拟环境端到端测试通过，**未在手机上测试** |
 | 4 回放与切换 | 连续播放、淡入淡出、切换、重新对齐、朝向音量、预缓存 | 代码完成；决策单元测试和模拟端到端测试通过，**未在手机上测试** |
-| 5 我的地图 | 见下 | 未开始 |
-| 6 城市广场 | 见下 | 未开始 |
+| 5 我的地图 | 收藏列表、改名、公开或私密、复制分享码、用分享码收藏、取消收藏；收藏的旅程加入收听 | 代码完成；双人模拟测试通过，**未在手机上测试** |
+| 6 城市广场 | 夜间灯光式光点图、点击光点列出公开旅程、试听 20 秒、收藏、Near me | 代码完成；双人模拟测试通过，**未在手机上测试** |
 | 7 打磨 | 见下 | 未开始 |
 
 ### 下一步：先在手机上验证阶段 2 和 3
@@ -133,7 +134,11 @@
 - 预先缓存附近旅程的录音，减少等待和流量。
 - 在 GPS 环境下重新调 `MAX_LISTEN_DISTANCE`（现为 20 米）和 `DIRECTION_CONE_DEGREES`（45°）。
 
-### 阶段 5：我的地图
+### 阶段 5：我的地图（代码已完成，待手机验证）
+
+界面：顶部两个标签页 My map / City plaza。My map 里有 My walks 和 Saved walks 两个列表；选中旅程后，Walk 区域显示操作按钮（自己的旅程：Rename、Make public/private、Copy share code；收藏的旅程：Remove from saved）。Saved walks 上方有分享码输入框。
+
+原计划：
 
 验收标准：能收藏、取消收藏、公开、设为私密，并用分享码在另一台手机上收藏。
 
@@ -142,7 +147,11 @@
 - 我收藏的：取消收藏（删除 `saves` 行）。
 - 输入分享码收藏：调用 `supabase.rpc('save_by_code', { code })`。
 
-### 阶段 6：城市广场
+### 阶段 6：城市广场（代码已完成，待手机验证）
+
+实现：没有底图，只有黑底光点，城市的形状由大家走过的地方自然浮现。光点亮度按该格旅程数的对数计算。旅程列表按光点所在约 200 米网格查询 `routes`（`is_public`，`center_lat/lng` 在格内）。试听用 1 小时有效的签名链接播放前 20 秒。以后如果需要地名参考，可以加 MapLibre 深色底图（需要 CDN 和地图瓦片服务）。
+
+原计划：
 
 验收标准：多条公开旅程在黑底光点图上可见，点击后能试听并收藏。
 
@@ -171,6 +180,8 @@ python3 tests/soundroute/run.py
 测试覆盖：录音 → 上传 → 刷新后仍在 → 第二次走同一路线时从对应秒数连续播放 → 离线上传失败后自动重传 → 删除。
 
 收听决策的单元测试：`node tests/soundroute/decide.test.mjs`。
+
+我的地图和城市广场的双人测试：`python3 tests/soundroute/share.py`（A 公开一条、保留一条私密；B 在广场试听并收藏、用分享码收藏、走路时听到、取消收藏；A 删除后 B 的收藏随之消失）。假的 Supabase 通过 `localStorage.setItem('fake-uid', …)` 切换用户，并模拟了数据库的可见性规则。
 改了 `cloud.js` 调用的 Supabase API 时，记得同步更新 `fake-supabase.js`。
 
 ## 8. 注意事项
