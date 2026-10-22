@@ -128,6 +128,21 @@ export function decideListen(state, cfg = LISTEN_CONFIG) {
 // Audio
 // ─────────────────────────────────────────────
 
+// 0.05 s of silence (8 kHz, 8-bit mono WAV), used to prime players on iPhone.
+const SILENT_WAV = (() => {
+  const n = 400;
+  const bytes = new Uint8Array(44 + n);
+  const v = new DataView(bytes.buffer);
+  const str = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  str(0, "RIFF"); v.setUint32(4, 36 + n, true); str(8, "WAVE"); str(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  str(36, "data"); v.setUint32(40, n, true); bytes.fill(128, 44);
+  let bin = "";
+  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  return `data:audio/wav;base64,${btoa(bin)}`;
+})();
+
 const FADE_IN_S = 1.2;
 const FADE_OUT_S = 1.5;
 const GAIN_SMOOTHING_S = 0.35;
@@ -143,35 +158,62 @@ export class ListenPlayer {
     this.blobCache = new Map(); // walkId → { url, bytes }
   }
 
-  /** Call from a tap: iPhone only lets audio start inside a user gesture. */
-  async unlock() {
+  /**
+   * Call from a tap: iPhone only lets audio start inside a user gesture.
+   * Never waits on anything that might not finish, so the caller can't hang.
+   */
+  unlock() {
     if (!this.ctx) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (Ctx) {
         this.ctx = new Ctx();
         for (const p of this.players) this.#connect(p);
+        // Starting the microphone on iPhone can suspend or "interrupt" audio
+        // output. Whenever that happens, try to bring it back.
+        this.ctx.addEventListener("statechange", () => {
+          this.log("[listen] audio output", this.ctx.state);
+          if (this.ctx.state !== "running" && this.ctx.state !== "closed") this.resume();
+        });
       }
     }
-    try {
-      await this.ctx?.resume();
-    } catch (e) {
-      this.log("[listen] audio context resume failed", e?.message || e);
-    }
-    // Prime both elements once with a silent play/pause so later play() calls
-    // work. Never touch a player that is already in use.
+    this.resume();
+    // Prime idle players once with a tiny silent clip (not an empty element:
+    // Safari can leave play() on an element without a source pending forever).
     if (this.primed) return;
     this.primed = true;
     for (const p of this.players) {
       if (p.walkId || p === this.active) continue;
       try {
         p.audio.muted = true;
-        await p.audio.play().catch(() => {});
-        if (!p.walkId) p.audio.pause();
-        p.audio.muted = false;
+        p.audio.src = SILENT_WAV;
+        const done = () => {
+          if (!p.walkId) p.audio.pause();
+          p.audio.muted = false;
+        };
+        const pr = p.audio.play();
+        if (pr && typeof pr.then === "function") pr.then(done, done);
+        else done();
+        setTimeout(done, 1500);
       } catch {
-        // ignore
+        p.audio.muted = false;
       }
     }
+  }
+
+  /** Make sure audio output is running (cheap; safe to call often). */
+  resume() {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state === "running" || ctx.state === "closed") return;
+    try {
+      const pr = ctx.resume();
+      if (pr && typeof pr.catch === "function") pr.catch((e) => this.log("[listen] audio resume failed", e?.message || e));
+    } catch (e) {
+      this.log("[listen] audio resume failed", e?.message || e);
+    }
+  }
+
+  get outputState() {
+    return this.ctx ? this.ctx.state : "no Web Audio";
   }
 
   get playingWalkId() {
@@ -205,6 +247,7 @@ export class ListenPlayer {
 
   /** Start a walk from `seconds`, fading in (and fading out whatever played). */
   play(walk, seconds, gain = 1) {
+    this.resume();
     const next = this.players.find((p) => p !== this.active) || this.players[0];
     const prev = this.active;
     if (prev) this.#fadeOutAndPause(prev);
@@ -254,6 +297,7 @@ export class ListenPlayer {
 
   /** Follow distance and facing smoothly. */
   setVolume(gain) {
+    this.resume();
     if (this.active) this.#setGain(this.active, gain, GAIN_SMOOTHING_S);
   }
 

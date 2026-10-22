@@ -534,11 +534,13 @@ function drawRoutePreview() {
   if (isRecording) ptsPrimary.push({ x: xMeters, y: yMeters, id: -1, kind: "live" });
 
   // All saved historical routes (faint) while recording + Listen Mode — not currentRecordingRoute.
-  const drawHistoricalListen = isRecording && listenModeEnabled && routes.length > 0;
+  const drawHistoricalListen = listenModeEnabled && routes.length > 0;
   const ptsHistorical = [];
   if (drawHistoricalListen) {
     for (const r of routes) {
+      if (r === getViewingRoute()) continue;
       for (const n of r.nodes) {
+        if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
         ptsHistorical.push({ x: n.x, y: n.y, id: n.id, kind: "secondary" });
       }
     }
@@ -591,8 +593,10 @@ function drawRoutePreview() {
   // Historical routes (each polyline from origin) under the live walk.
   if (drawHistoricalListen) {
     for (const r of routes) {
-      if (!r.nodes.length) continue;
-      const ptsH = r.nodes.map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "secondary" }));
+      if (!r.nodes.length || r === getViewingRoute()) continue;
+      const ptsH = r.nodes
+        .filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y))
+        .map((n) => ({ x: n.x, y: n.y, id: n.id, kind: "secondary" }));
       strokePath(ptsH, { strokeStyle: "rgba(255,255,255,0.2)", lineWidth: 2 });
     }
   }
@@ -974,9 +978,10 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function unlockAudioPlayback() {
+function unlockAudioPlayback() {
   // Must run inside a tap: iPhone only lets audio start from a user gesture.
-  await listenPlayer.unlock();
+  // Doesn't wait for anything, so the button always responds at once.
+  listenPlayer.unlock();
 }
 
 function prefetchNearbyWalks(sources, x, y) {
@@ -1038,6 +1043,7 @@ function updateListenMode(currentX, currentY, heading) {
   lastDirectionUpdateMs = now;
 
   prefetchNearbyWalks(sources, currentX, currentY);
+  listenPlayer.resume();
 
   const playingId = listenPlayer.playingWalkId;
   const d = decideListen({
@@ -1776,6 +1782,9 @@ function renderAll() {
 startBtn.addEventListener("click", () => {
   console.log("[ui] Start New Walk tapped");
   startNewWalk();
+  // Also a tap: re-open audio output (after the motion permission request,
+  // which must come first on iPhone).
+  if (listenModeEnabled) unlockAudioPlayback();
 });
 
 endBtn.addEventListener("click", () => {
@@ -1787,12 +1796,15 @@ deleteRouteBtn.addEventListener("click", () => {
   deleteSelectedRoute();
 });
 
-listenToggleBtn.addEventListener("click", async () => {
+listenToggleBtn.addEventListener("click", () => {
   // User gesture: good place to unlock audio.
   if (!listenModeEnabled) {
     listenModeEnabled = true;
-    console.log("[listen] Listen Mode enabled");
-    await unlockAudioPlayback();
+    unlockAudioPlayback();
+    debugLog("[listen] Listen Mode on", {
+      walks: getListenSourceRoutes().length,
+      audio: listenPlayer.outputState,
+    });
   } else {
     listenModeEnabled = false;
     console.log("[listen] Listen Mode disabled");
@@ -1891,6 +1903,10 @@ async function loadMyWalks() {
   if (!selectedRoute && !currentRecordingRoute) selectedRoute = routes[0] || null;
   renderAll();
   debugLog("[cloud] my walks loaded:", mine.length);
+  if (listenModeEnabled) {
+    lastDirectionUpdateMs = 0;
+    updateListenMode(xMeters, yMeters, headingDeg);
+  }
 
   // Signed audio links expire after an hour: renew them in good time.
   setInterval(() => {
