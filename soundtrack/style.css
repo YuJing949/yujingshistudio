@@ -785,3 +785,9 @@ body {
 .guide-nav .btn {
   min-width: 110px;
 }
+
+.have-code {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}

@@ -107,6 +107,7 @@ const linkEmail = document.getElementById("linkEmail");
 const signInForm = document.getElementById("signInForm");
 const signInEmail = document.getElementById("signInEmail");
 const otpForm = document.getElementById("otpForm");
+const haveCodeBtn = document.getElementById("haveCodeBtn");
 const otpInput = document.getElementById("otpInput");
 const signOutBtn = document.getElementById("signOutBtn");
 const helpBtn = document.getElementById("helpBtn");
@@ -2028,13 +2029,23 @@ async function renderAccount() {
   }
 }
 
+// After sending: point to the link in the email. The code box stays tucked
+// behind "Have a code?" (emails only carry a code once custom SMTP lets the
+// templates include {{ .Token }}; useful inside the Home Screen app).
 function askForCode(purpose, email, sentMessage) {
   otpPurpose = purpose;
   otpEmail = email;
-  otpForm.hidden = false;
+  otpForm.hidden = true;
+  haveCodeBtn.hidden = false;
   otpInput.value = "";
   accountMsg.textContent = sentMessage;
 }
+
+haveCodeBtn.addEventListener("click", () => {
+  haveCodeBtn.hidden = true;
+  otpForm.hidden = false;
+  otpInput.focus();
+});
 
 linkForm.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -2047,7 +2058,7 @@ linkForm.addEventListener("submit", async (e) => {
     askForCode(
       "link",
       email,
-      `Check ${email}: tap the link, or type the code from the email here. Your walks stay the same.`,
+      `Check ${email} and tap the link in the email. Your walks stay the same.`,
     );
   } catch (err) {
     accountMsg.textContent = err?.message || String(err);
@@ -2068,7 +2079,11 @@ signInForm.addEventListener("submit", async (e) => {
   try {
     const sb = await import("./supabase.js");
     await sb.sendSignIn(email);
-    askForCode("signin", email, `Check ${email}: tap the link, or type the code from the email here.`);
+    askForCode(
+      "signin",
+      email,
+      `Check ${email} and tap the link in the email. It opens SoundRoute in your browser, signed in.`,
+    );
   } catch (err) {
     accountMsg.textContent = err?.message || String(err);
   }
@@ -2084,6 +2099,7 @@ otpForm.addEventListener("submit", async (e) => {
     if (otpPurpose === "link") await sb.confirmLinkCode(otpEmail, code);
     else await sb.confirmSignInCode(otpEmail, code);
     otpForm.hidden = true;
+    haveCodeBtn.hidden = true;
     accountMsg.textContent = otpPurpose === "link" ? "Email linked. Your walks are kept." : "Signed in. Loading your walks…";
     if (otpPurpose === "signin") setTimeout(() => location.reload(), 600);
     else renderAccount();

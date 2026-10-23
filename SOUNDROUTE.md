@@ -126,10 +126,11 @@
 **阶段 7 需要做的：**
 - [ ] **重新运行 `supabase/soundroute.sql`**：从 GitHub 的 `v2` 分支复制完整文件内容，粘贴到 SQL Editor 运行。它会新增 `reports` 表、`hidden` 列、触发器，并更新权限规则。
 - [ ] **Authentication → URL Configuration**：Site URL 填 `https://soundroute.yujingshistudio.com`；Redirect URLs 加上 `https://soundroute-preview.zoesyj1130.workers.dev/**` 和 `https://soundroute.yujingshistudio.com/**`。
-- [ ] **Authentication → Emails → Templates**：在 **Magic Link** 和 **Change Email Address** 两个模板里各加一行 `Your code: {{ .Token }}`，邮件里才会出现 6 位验证码。
+上线前建议（需要自定义 SMTP）：
+- [ ] **接入自己的邮件服务**：Supabase 自带的邮件服务每小时只能发很少几封，而且不允许修改邮件模板。在 Authentication → Emails → SMTP Settings 接入 Resend：Host `smtp.resend.com`，端口 `465`，Username `resend`，Password 填 Resend 的 API key；发件地址用在 Resend 验证过的域名，例如 `noreply@yujingshistudio.com`。
+- [ ] **接入之后，在邮件里加验证码**：Authentication → Emails → Templates，在 **Magic Link** 和 **Change Email Address** 两个模板里各加一行 `<p>Your code: {{ .Token }}</p>`。
 
-上线前建议：
-- [ ] Supabase 自带的邮件服务每小时只能发很少几封。正式使用前在 Authentication → SMTP Settings 接入自己的邮件服务（例如 Resend）。
+**现在的邮件只有链接，没有验证码**，所以页面上只提示“点邮件里的链接”，验证码输入框收在 “Have a code?” 后面。只有链接时：绑定邮箱在任何浏览器里点都可以；在新设备上用 Safari 登录也没问题；只有在**主屏幕应用**里登录不行，因为链接会打开 Safari。这时需要验证码，也就是要先接入 SMTP。
 
 **日常管理（审核举报）**：在 Table Editor 打开 `reports` 表查看被举报的旅程。没问题就在 `routes` 表把它的 `hidden` 改回 false；有问题就删除 `routes` 里那一行（录音文件也要在 Storage → route-audio 里删掉）。
 
@@ -143,7 +144,7 @@
 - [ ] **阶段 7**：
   - 无痕窗口打开时出现首次引导；
   - 添加到主屏幕后，从图标打开像一个应用；
-  - 绑定邮箱：收到邮件后输入验证码，Your account 显示 “Linked to…”；
+  - 绑定邮箱：点邮件里的链接，回到页面刷新后，Your account 显示 “Linked to…”；
   - 在另一个浏览器用同一个邮箱登录，能看到同样的旅程；
   - 用无痕窗口举报一段公开旅程。
 
