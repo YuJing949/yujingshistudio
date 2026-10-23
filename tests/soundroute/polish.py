@@ -18,7 +18,7 @@ os.makedirs(OUT, exist_ok=True)
 
 with sync_playwright() as p:
     b = p.chromium.launch(args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"])
-    ctx = b.new_context(viewport={"width": 390, "height": 844}, geolocation={"latitude": START[0], "longitude": START[1], "accuracy": 8}, permissions=["geolocation", "microphone"])
+    ctx = b.new_context(viewport={"width": 390, "height": 844}, geolocation={"latitude": START[0], "longitude": START[1], "accuracy": 8}, permissions=["geolocation", "microphone", "accelerometer", "gyroscope", "magnetometer"])
     ctx.route("**/cdn.jsdelivr.net/**", lambda r: r.fulfill(status=200, content_type="application/javascript", body=FAKE))
     answers = []
     pg = ctx.new_page()

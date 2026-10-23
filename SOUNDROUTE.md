@@ -179,6 +179,8 @@ python3 tests/soundroute/share.py          # 两个人：公开、广场、试�
 python3 tests/soundroute/polish.py         # 引导、主屏幕横幅、隐去起点、三人举报隐藏、邮箱绑定
 ```
 
+较新的 Chromium（156 起）也实现了 `DeviceMotionEvent.requestPermission()`，无头模式下默认返回 denied，所以三个浏览器测试在 `new_context` 里额外授予了 `accelerometer`、`gyroscope`、`magnetometer` 权限。
+
 截图保存在 `tests/soundroute/out/`（已在 .gitignore 里）。改了 `cloud.js` 或 `supabase.js` 调用的 Supabase API 时，要同步更新 `fake-supabase.js`。数据库规则的改动要另外在真实或本地 Postgres 里验证，假客户端只是近似模拟。
 
 ## 10. 可调参数
