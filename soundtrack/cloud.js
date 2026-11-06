@@ -114,7 +114,7 @@ export async function uploadWalk(walk) {
 }
 
 const WALK_COLUMNS =
-  "id, name, is_public, hidden, share_code, duration_s, audio_path, audio_mime, created_at, points(t, lat, lng, heading, accuracy)";
+  "id, name, is_public, hidden, share_code, duration_s, audio_path, audio_mime, created_at, center_lat, center_lng, points(t, lat, lng, heading, accuracy)";
 
 function toWalk(r) {
   return {
@@ -127,6 +127,8 @@ function toWalk(r) {
     isPublic: r.is_public,
     hidden: Boolean(r.hidden),
     shareCode: r.share_code,
+    centerLat: r.center_lat ?? null,
+    centerLng: r.center_lng ?? null,
     nodes: (r.points || [])
       .slice()
       .sort((a, b) => a.t - b.t)
@@ -233,6 +235,28 @@ export async function loadPlazaCellWalks(cell) {
     audioPath: r.audio_path,
     createdAt: Date.parse(r.created_at),
   }));
+}
+
+/** Public walks for the City (newest first, with their points). */
+export async function loadPublicWalks(limit = 300) {
+  await ensureVisitor();
+  const { data, error } = await supabase
+    .from("routes")
+    .select(WALK_COLUMNS)
+    .eq("is_public", true)
+    .eq("hidden", false)
+    .not("audio_path", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data.map(toWalk);
+}
+
+/** How many other people saved one of your walks (null if unknown). */
+export async function saveCount(routeId) {
+  const { data, error } = await supabase.rpc("save_count", { route: routeId });
+  if (error) return null; // function not installed yet: fall back to the general wording
+  return Number(data) || 0;
 }
 
 /** The visitor's own walks, newest first, with their points. */

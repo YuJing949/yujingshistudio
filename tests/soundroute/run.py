@@ -1,74 +1,97 @@
-"""End-to-end test for SoundRoute in headless Chromium, with a fake Supabase.
+"""End-to-end test: record → save → reload → listen → offline retry → delete.
 
 Usage (from the repo root):
     pip install playwright && playwright install chromium
     (cd soundtrack && python3 -m http.server 8765) &
     python3 tests/soundroute/run.py
 
-The real Supabase client (loaded from cdn.jsdelivr.net) is replaced by
-fake-supabase.js, which keeps its data in localStorage. GPS, microphone and
-compass are simulated. Screenshot: tests/soundroute/out/e2e.png
+Screenshots: tests/soundroute/out/ (walking.png, mine.png, home.png, mymap.png)
 """
 import os
-HERE = os.path.dirname(os.path.abspath(__file__))
-from playwright.sync_api import sync_playwright
-FAKE=open(os.path.join(HERE,'fake-supabase.js')).read()
-BASE='http://localhost:8765/index.html'
-def log(pg): return pg.evaluate("document.getElementById('debugLogPre').textContent")
-with sync_playwright() as p:
-    b=p.chromium.launch(args=["--use-fake-ui-for-media-stream","--use-fake-device-for-media-stream","--autoplay-policy=no-user-gesture-required"])
-    ctx=b.new_context(viewport={'width':390,'height':844},geolocation={'latitude':51.48650,'longitude':-0.12350,'accuracy':8},permissions=['geolocation','microphone','accelerometer','gyroscope','magnetometer'])
-    ctx.add_init_script("try { localStorage.setItem('soundroute-guide','seen'); localStorage.setItem('soundroute-home-banner','dismissed'); } catch (e) {}")
-    ctx.route("**/cdn.jsdelivr.net/**", lambda r: r.fulfill(status=200, content_type="application/javascript", body=FAKE))
-    names=iter(["Test walk A","Test walk B","Offline walk C"])
-    pg=ctx.new_page(); errs=[]
-    pg.on('pageerror',lambda e: errs.append(str(e)))
-    pg.on('dialog',lambda d: d.accept(next(names)) if d.type=='prompt' else d.accept())
-    pg.goto(BASE); pg.wait_for_timeout(2000)
-    print('1 cloud:', pg.inner_text('#cloudText'))
+import sys
 
-    def walk(seconds, heading=0, listen=False):
-        pg.click('#startBtn'); pg.wait_for_timeout(3500)
-        if listen: pg.click('#listenToggleBtn')
-        lat=51.48650
-        for i in range(seconds):
-            lat+=0.000012  # ~1.3 m north per second
-            ctx.set_geolocation({'latitude':lat,'longitude':-0.12350,'accuracy':8})
-            pg.evaluate(f"""()=>{{const e=new Event('deviceorientation'); Object.defineProperty(e,'webkitCompassHeading',{{value:{heading}}}); Object.defineProperty(e,'alpha',{{value:0}}); Object.defineProperty(e,'beta',{{value:80}}); Object.defineProperty(e,'gamma',{{value:0}}); window.dispatchEvent(e);}}""")
-            pg.wait_for_timeout(1000)
-        print('   status during walk:', pg.inner_text('#statusText'), '| points:', pg.inner_text('#nodesCount'))
-        pg.evaluate("window.__lastPlayback = document.getElementById('playbackText').textContent")
-        pg.click('#endBtn'); pg.wait_for_timeout(3000)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from blue import START, check, run  # noqa: E402
 
-    walk(12)
-    print('2 after walk A:', pg.inner_text('#nodesList').replace('\n',' | ')[:220])
-    db=pg.evaluate("JSON.parse(localStorage.getItem('fake-supabase-db'))")
-    print('  cloud rows:', [(r['name'],r['share_code'],r['duration_s']) for r in db['routes']], 'points:', len(db['points']), 'files:', len(db['files']))
 
-    pg.reload(); pg.wait_for_timeout(2500)
-    print('3 after reload, my walks:', pg.inner_text('#routesList').replace('\n',' | '))
-    print('  audio src kind:', pg.evaluate("document.querySelector('#nodesList audio')?.src.slice(0,22)"))
+def test(app):
+    pg = app.pg
+    app.goto()
+    check("opens on Journey (guide already seen)", app.screen() == "intro", app.screen())
+    pg.wait_for_timeout(1000)
+    check("cloud connected", "[cloud] signed in" in app.log())
 
-    # walk B from same start, listening
-    ctx.set_geolocation({'latitude':51.48650,'longitude':-0.12350,'accuracy':8}); pg.wait_for_timeout(500)
-    walk(10, listen=True)
-    L=log(pg); lines=[l[15:] for l in L.split('\n') if '[listen]' in l and ('play' in l or 'start' in l or 'switch' in l or 'resync' in l or 'stop' in l)]
-    print('4 listen events:', lines[:6])
-    print('  playback text at end of walk B:', pg.evaluate("window.__lastPlayback || ''"))
+    # ── Too short to keep ──
+    app.start_walk()
+    check("first walk asks for permissions, then records", app.screen() == "walking")
+    app.move(3)
+    pg.click("#endBtn")
+    pg.wait_for_timeout(600)
+    check("a 3-second walk asks 'Too short to keep'", app.visible("#dialog") and "Too short" in app.text("#dialogTitle"))
+    pg.click("#dialogNo")  # Keep walking
+    pg.wait_for_timeout(500)
+    check("'Keep walking' carries on recording", app.screen() == "walking" and not app.visible("#dialog"))
 
-    # offline walk C
+    # ── Walk A ──
+    app.move(12)
+    arc = pg.get_attribute("#micArc", "stroke-dasharray")
+    check("orange progress arc grows", float(arc.split()[0]) > 5, arc)
+    pg.click("#micBtn")
+    pg.wait_for_timeout(300)
+    check("mic button pauses", pg.get_attribute("#micBtn", "aria-pressed") == "false")
+    pg.click("#micBtn")
+    app.shot("walking")
+    app.end_walk("Test walk A", save=False)
+    check("Ending leads to the new walk's details", app.screen() == "walk" and app.text("#walkTitleBtn") == "Test walk A")
+    check("new walk shows Discard and Save", app.text("#walkCorner") == "Discard" and app.visible("#walkSave"))
+    check("route drawn in the orb", pg.locator("#walkRoute path").count() >= 1)
+    app.shot("mine")
+    pg.click("#walkSave")
+    app.wait_screen("home")
+    pg.wait_for_timeout(1500)
+    check("Save goes to Home with the walk's name", app.text("#homeTitle") == "Test walk A")
+    db = app.db()
+    rows = [(r["name"], r["share_code"], r["duration_s"]) for r in db.get("routes", [])]
+    check("walk A uploaded", len(rows) == 1 and rows[0][0] == "Test walk A", rows)
+    check("points and audio uploaded", len(db.get("points", [])) > 3 and len(db.get("files", {})) == 1, (len(db.get("points", [])), len(db.get("files", {}))))
+    app.shot("home")
+
+    # ── Reload: still there ──
+    pg.reload()
+    pg.wait_for_timeout(2500)
+    app.tab("mymap")
+    pg.wait_for_timeout(800)
+    check("after reload, My map lists walk A", "Test walk A" in app.text("#myCards") and app.text("#segMine") == "Mine 1", app.text("#mymapSummary"))
+    app.shot("mymap")
+
+    # ── Walk B from the same start: hears walk A ──
+    app.walk("Test walk B", 10)
+    events = [l[15:] for l in app.log().split("\n") if "[listen] start" in l or "[listen] switch" in l]
+    check("walking near walk A plays it", any("Test walk A" in e for e in events), events[:3])
+
+    # ── Offline walk C, retried after reload ──
     pg.evaluate("localStorage.setItem('fake-fail-upload','1')")
-    walk(6)
-    print('5 offline walk C:', pg.inner_text('#nodesList').replace('\n',' | ')[:200])
+    app.walk("Offline walk C", 12, expect_upload=False)
+    pg.wait_for_timeout(1500)
+    check("failed upload says so on Home", "Not uploaded yet" in app.text("#homeStatus"), app.text("#homeStatus"))
     pg.evaluate("localStorage.removeItem('fake-fail-upload')")
-    pg.reload(); pg.wait_for_timeout(4000)
-    print('6 after reload (retry):', pg.inner_text('#routesList').replace('\n',' | '))
+    pg.reload()
+    pg.wait_for_timeout(4000)
+    names = [r["name"] for r in app.db()["routes"]]
+    check("after reload the waiting walk uploads", "Offline walk C" in names, names)
 
-    # delete walk A
-    pg.click("#routesList li:has-text('Test walk A') button"); pg.wait_for_timeout(300)
-    pg.click('#deleteRouteBtn'); pg.wait_for_timeout(1500)
-    db=pg.evaluate("JSON.parse(localStorage.getItem('fake-supabase-db'))")
-    print('7 after delete:', pg.inner_text('#routesList').replace('\n',' | '), '| cloud rows:', [r['name'] for r in db['routes']], 'files:', len(db['files']))
-    print('page errors:', errs)
-    os.makedirs(os.path.join(HERE,'out'),exist_ok=True); pg.screenshot(path=os.path.join(HERE,'out','e2e.png'), full_page=True)
-    b.close()
+    # ── Delete walk A ──
+    files_before = len(app.db()["files"])
+    app.open_my_walk("Test walk A")
+    check("My walk shows the share code", app.visible("#shareCode") and "-" in app.text("#shareCode"), app.text("#shareCode"))
+    pg.click("#walkCorner")  # Delete
+    pg.wait_for_timeout(600)
+    check("delete asks first", "Delete this walk?" in app.text("#dialogTitle"))
+    pg.click("#dialogYes")
+    toast = app.wait_toast()
+    db = app.db()
+    check("walk deleted", toast == "Walk deleted" and "Test walk A" not in [r["name"] for r in db["routes"]], toast)
+    check("its audio file deleted", len(db["files"]) == files_before - 1)
+
+
+run(test)

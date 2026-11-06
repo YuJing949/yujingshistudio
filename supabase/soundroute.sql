@@ -371,3 +371,26 @@ as $$
   where is_public and not hidden and center_lat is not null and center_lng is not null
   group by 1, 2;
 $$;
+
+-- ═════════════════════════════════════════════
+-- Blue redesign: how many people saved one of your walks
+-- (shown before you delete it). Only the owner gets a number.
+-- ═════════════════════════════════════════════
+
+create or replace function public.save_count(route uuid)
+returns integer
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select count(*)::int
+  from public.saves s
+  join public.routes r on r.id = s.route_id
+  where s.route_id = route
+    and r.owner = auth.uid()
+    and s.user_id <> auth.uid();
+$$;
+
+revoke all on function public.save_count(uuid) from public, anon;
+grant execute on function public.save_count(uuid) to authenticated;

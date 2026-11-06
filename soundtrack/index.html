@@ -3,311 +3,364 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0b0b0c" />
+    <meta name="theme-color" content="#FFFFFF" />
+    <meta name="color-scheme" content="light only" />
     <title>SoundRoute</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="SoundRoute" />
     <meta name="description" content="Walk through sound: record your journey, hear the walks left before you." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <main class="app" role="main">
-      <header class="header">
-        <div class="title-row">
-          <h1>SoundRoute</h1>
-          <button id="helpBtn" class="help-btn" type="button" aria-label="How SoundRoute works">?</button>
+    <div id="stage" class="stage">
+      <!-- ───────────── First time: guide ───────────── -->
+      <section id="s-guide" class="screen" data-tab="journey" aria-label="Welcome" hidden>
+        <div class="bg" data-bg="drift"></div>
+        <div class="guide-track">
+          <div class="gpage" data-page="1">
+            <div class="mid-frame" aria-hidden="true">
+              <div class="guide-orb"><div class="halo sr-halo"></div><div class="orb sr-orb"></div></div>
+              <span class="guide-phones" data-icon="headphones-lg"></span>
+            </div>
+            <div class="guide-text">
+              <h1 class="t-display">Hi, this is<br />Parrot.</h1>
+              <p class="t-body">Walk anywhere and record up to 5 minutes: your voice and the sounds around you. People who walk there later hear what you left behind.</p>
+              <p class="t-small grey">Put on headphones. In the concept, the phone rides in a parrot on your shoulder.</p>
+            </div>
+          </div>
+          <div class="gpage" data-page="2">
+            <div class="mid-frame guide-routes" aria-hidden="true">
+              <svg viewBox="0 0 390 844" class="fill">
+                <path d="M-10 140 C70 170 120 240 236 290 C320 326 360 420 410 470" fill="none" stroke="#fff" stroke-width="4.6" stroke-dasharray="5 3" stroke-linecap="round" />
+                <path d="M40 360 C120 330 170 300 236 290 C300 280 340 220 400 180" fill="none" stroke="#fff" stroke-opacity=".72" stroke-width="1" stroke-dasharray="3.4 2.6" />
+                <path d="M120 60 C150 140 200 200 236 290 C260 350 250 420 290 500" fill="none" stroke="#fff" stroke-opacity=".72" stroke-width="1" stroke-dasharray="3.4 2.6" />
+              </svg>
+              <div class="seek-dot sr-seek"></div>
+              <div class="seek-core"></div>
+            </div>
+            <div class="guide-text">
+              <h1 class="t-display">Follow<br />the sound</h1>
+              <p class="t-body">Walk near a walk you saved and its sound fades in from the spot where it was recorded. Turn toward it to hear it more clearly.</p>
+              <p class="t-small grey">Walks are private until you share them. The first 30 m are left out, so your starting point stays yours.</p>
+            </div>
+          </div>
+          <div class="gpage" data-page="3">
+            <div class="app-icon" aria-hidden="true"><div></div></div>
+            <div class="app-name" aria-hidden="true">SoundRoute</div>
+            <div class="guide3-text">
+              <h1 class="t-display">Keep your<br />walks</h1>
+              <p class="t-sub">Safari can clear a website’s data after a week without a visit. On your Home Screen, SoundRoute opens like an app and keeps them.</p>
+              <ol class="steps" data-steps="safari">
+                <li><span class="grey">1</span>Tap Share<span data-icon="share"></span></li>
+                <li><span class="grey">2</span>Add to Home Screen<span data-icon="add-square"></span></li>
+              </ol>
+              <ol class="steps" data-steps="other" hidden>
+                <li><span class="grey">1</span>Open this page in Safari first</li>
+                <li><span class="grey">2</span>Then tap Share, Add to Home Screen</li>
+              </ol>
+            </div>
+          </div>
+          <div class="gpage" data-page="4">
+            <div class="guide4-text">
+              <h1 class="t-display">Find something<br />to hear</h1>
+              <p class="t-body">You only hear your own walks and the ones you save. Save a few before you head out.</p>
+              <div class="choices">
+                <button type="button" class="choice" data-go="city"><span>Explore the City</span><span class="t-small grey">Public walks near you</span></button>
+                <button type="button" class="choice" data-go="code"><span>I have a share code</span><span class="t-small grey">Add a walk someone sent you</span></button>
+                <button type="button" class="choice" data-go="record"><span>Record my own walk first</span><span class="t-small grey">Start walking now</span></button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div id="homeBanner" class="home-banner" hidden>
-          <span>Add SoundRoute to your Home Screen so your walks are kept.</span>
-          <button id="homeBannerHow" class="link-btn" type="button">How</button>
-          <button id="homeBannerClose" class="link-btn" type="button" aria-label="Dismiss">✕</button>
-        </div>
-        <p class="subtitle">
-          Walk through sound: record up to 5 minutes, hear the walks left before you.
-        </p>
-        <nav class="tabs" role="tablist" aria-label="Views">
-          <button id="tabMap" class="tab selected" type="button" role="tab" aria-selected="true">My map</button>
-          <button id="tabPlaza" class="tab" type="button" role="tab" aria-selected="false">City plaza</button>
+        <button type="button" class="corner-link" id="guideSkip">Skip</button>
+        <button type="button" class="back" id="guideBack" aria-label="Back" hidden><span data-icon="back"></span></button>
+        <div class="page-dots" id="guideDots" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+        <button type="button" class="btn btn-69 guide-next" id="guideNext">Next</button>
+      </section>
+
+      <!-- ───────────── Journey: start ───────────── -->
+      <section id="s-intro" class="screen" data-tab="journey" aria-label="Journey" hidden>
+        <div class="bg" data-bg="drift"></div>
+        <button type="button" class="intro-pending t-small grey" id="introPending" hidden></button>
+        <h1 class="t-display intro-title"><button type="button" id="introTitle">Start your<br />journey</button></h1>
+        <button type="button" class="corner-link" id="justListenBtn">Just listen</button>
+        <nav class="nav-intro" aria-label="Pages">
+          <svg class="nav-intro-join" aria-hidden="true" width="332.5" height="75.5" viewBox="28.7 757.5 332.5 75.5"><path d="M84.5 769.2 L87.0 770.9 L89.6 773.4 L92.1 776.0 L94.6 779.8 L97.2 784.4 L99.7 787.8 L102.3 790.3 L104.8 792.0 L107.3 792.5 L109.9 792.0 L112.4 790.8 L114.9 788.7 L117.5 785.3 L120.0 780.6 L122.5 776.8 L125.1 773.9 L125.1 817.8 L122.5 814.8 L120.0 811.0 L117.5 806.8 L114.9 803.4 L112.4 801.3 L109.9 799.6 L107.3 799.2 L104.8 800.1 L102.3 801.3 L99.7 803.9 L97.2 807.7 L94.6 811.9 L92.1 815.7 L89.6 818.7 L87.0 820.8 L84.5 822.9 Z" fill="#000000"></path></svg>
+          <button type="button" class="nav-start" id="startBtn" aria-label="Start your journey"><span data-icon="arrow-up"></span></button>
+          <button type="button" class="nav-item is-current nav-journey-cur" aria-label="Journey" aria-current="page"><span data-icon="journey"></span></button>
+          <button type="button" class="nav-item" data-tab-go="city" aria-label="City" style="left: 192.5px"><span data-icon="city"></span></button>
+          <button type="button" class="nav-item" data-tab-go="mymap" aria-label="My map" style="left: 265px"><span data-icon="mymap"></span></button>
         </nav>
-      </header>
-
-      <div id="mapView">
-
-      <section class="routes" aria-label="Routes">
-        <div class="routes-top">
-          <h2>My walks</h2>
-          <button id="deleteRouteBtn" class="btn btn-ghost" type="button" disabled>
-            Delete walk
-          </button>
-        </div>
-        <div id="routesEmpty" class="empty">No walks yet.</div>
-        <ol id="routesList" class="routes-list"></ol>
       </section>
 
-      <section class="routes" aria-label="Saved walks">
-        <div class="routes-top">
-          <h2>Saved walks</h2>
+      <!-- ───────────── Before you walk ───────────── -->
+      <section id="s-perms" class="screen" data-tab="journey" aria-label="Before you walk" hidden>
+        <div class="bg" data-bg="drift"></div>
+        <h1 class="t-display perms-title">Before<br />you walk</h1>
+        <p class="t-sub perms-lead" id="permsLead">Your phone will ask three times. Allow all three so your walk can be heard later.</p>
+        <ol class="perm-list">
+          <li data-perm="motion"><span class="perm-icon" data-icon="compass"></span><span><span class="perm-name">Motion &amp; compass</span><span class="perm-note" data-note="Which way you face and when you take a step.">Which way you face and when you take a step.</span></span></li>
+          <li data-perm="mic"><span class="perm-icon" data-icon="mic-sm"></span><span><span class="perm-name">Microphone</span><span class="perm-note" data-note="Records your walk, surroundings included.">Records your walk, surroundings included.</span></span></li>
+          <li data-perm="location"><span class="perm-icon" data-icon="pin"></span><span><span class="perm-name">Location</span><span class="perm-note" data-note="Places each sound where you heard it. Your start point is never stored.">Places each sound where you heard it. Your start point is never stored.</span></span></li>
+        </ol>
+        <button type="button" class="back" data-back aria-label="Back"><span data-icon="back"></span></button>
+        <button type="button" class="btn btn-69 perms-go" id="permsGo">Allow and start</button>
+      </section>
+
+      <!-- ───────────── Finding you ───────────── -->
+      <section id="s-gps" class="screen" data-tab="journey" aria-label="Finding you" hidden>
+        <div class="bg" data-bg="drift"></div>
+        <div class="mid-frame" aria-hidden="true">
+          <div class="gps-ring sr-seek"></div>
+          <div class="gps-ring sr-seek" style="animation-delay: -1.2s"></div>
+          <div class="gps-core" id="gpsCore"></div>
         </div>
-        <p class="hint">Walks you save from other people play while you walk, alongside your own.</p>
-        <form id="codeForm" class="code-form" autocomplete="off">
-          <input id="codeInput" class="code-input" type="text" inputmode="text" autocapitalize="none"
-            spellcheck="false" placeholder="Share code, e.g. misty-parrot-0417" aria-label="Share code" />
-          <button id="codeBtn" class="btn btn-ghost btn-small" type="submit">Save</button>
+        <div class="gps-text">
+          <h1 class="t-display">Finding<br />you…</h1>
+          <p class="t-sub" id="gpsNote">Step outside for a moment. Recording starts as soon as GPS finds you.</p>
+        </div>
+        <button type="button" class="back" id="gpsCancel" aria-label="Cancel"><span data-icon="back"></span></button>
+        <button type="button" class="btn btn-56 btn-outline gps-anyway" id="gpsAnyway" hidden>Start anyway</button>
+      </section>
+
+      <!-- ───────────── Walking (recording) ───────────── -->
+      <section id="s-walking" class="screen" data-tab="journey" aria-label="Recording your walk" hidden>
+        <div class="bg" data-bg="drift"></div>
+        <div class="mid-frame">
+          <div class="orb-wrap sr-in" id="walkOrb"><div class="halo sr-halo"></div><div class="orb sr-orb"></div></div>
+        </div>
+        <div class="pill sr-pill">
+          <button type="button" class="pill-btn" id="micBtn" aria-label="Recording, tap to stop recording" aria-pressed="true">
+            <svg class="mic-ring" aria-hidden="true" width="60" height="60" viewBox="0 0 60 60"><circle cx="30" cy="30" r="29" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="1.6"></circle><circle id="micArc" cx="30" cy="30" r="29" fill="none" stroke="#FF7B04" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="0 182.2" transform="rotate(-90 30 30)"></circle></svg>
+            <span data-icon="mic"></span>
+          </button>
+          <button type="button" class="pill-btn" id="endBtn" aria-label="End walk"><span class="stop-square" aria-hidden="true"></span></button>
+        </div>
+      </section>
+
+      <!-- ───────────── A walk in the orb: Ending, Mine, My walk, Other ───────────── -->
+      <section id="s-walk" class="screen" data-tab="journey" aria-label="Walk" hidden>
+        <div class="bg end-bg" data-bg="drift"></div>
+        <div class="mid-frame">
+          <div class="orb-big end-grow" aria-hidden="true"></div>
+          <div class="orb-route" id="walkRoute"></div>
+        </div>
+        <div class="panel end-panel" aria-hidden="true"></div>
+        <div class="panel-content">
+          <h1 class="t-display panel-title end-s1" id="walkTitle"><button type="button" id="walkTitleBtn"></button></h1>
+          <label class="rename" id="renameBox" hidden>
+            <span class="visually-hidden">Walk name</span>
+            <textarea id="renameInput" rows="1" maxlength="40" enterkeyhint="done" autocomplete="off" spellcheck="false"></textarea>
+          </label>
+          <p class="t-small grey rename-hint" id="renameHint" hidden>Name it after what you heard</p>
+          <button type="button" class="pen end-s2" id="penBtn" aria-label="Rename walk"><span data-icon="pen"></span></button>
+          <div class="author end-s2" id="walkAuthor" hidden><span class="avatar" aria-hidden="true"><span></span><span></span></span>Anonymous</div>
+        </div>
+        <div class="mid-frame mid-pass">
+          <p class="t-body walk-meta end-s3" id="walkMeta"></p>
+          <div class="walk-share" id="walkShare" hidden>
+            <div class="share-row">Public
+              <button type="button" class="switch" id="publicSwitch" role="switch" aria-checked="false" aria-label="Show in City"><span></span></button>
+            </div>
+            <p class="t-small grey" id="publicNote">Off: only people with the code can add it.</p>
+            <p class="t-small grey share-label">Share code</p>
+            <div class="share-code" id="shareCode"></div>
+            <div class="share-actions">
+              <button type="button" class="btn-44 btn-black" id="copyBtn">Copy</button>
+              <button type="button" class="circle-44" id="downloadBtn" aria-label="Download audio and route"><span data-icon="download"></span></button>
+            </div>
+          </div>
+          <p class="t-small grey walk-status" id="walkStatus" hidden></p>
+        </div>
+        <button type="button" class="back end-s4" id="walkBack" aria-label="Back"><span data-icon="back"></span></button>
+        <button type="button" class="corner-link end-s5" id="walkCorner"></button>
+        <p class="corner-text" id="walkReported" hidden>Reported</p>
+        <button type="button" class="btn btn-69 walk-save end-s5" id="walkSave" hidden>Save</button>
+        <button type="button" class="circle-69 walk-action" id="walkHeart" aria-label="Save to My map" aria-pressed="false" hidden><span data-icon="heart"></span></button>
+        <button type="button" class="circle-69 walk-action" id="walkPlay" aria-label="Play" hidden><span data-icon="play"></span></button>
+        <div class="pill end-pill" aria-hidden="true">
+          <span class="pill-btn"><svg aria-hidden="true" width="60" height="60" viewBox="0 0 60 60" class="mic-ring"><circle cx="30" cy="30" r="29" fill="none" stroke="#FF7B04" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="145 182.2" transform="rotate(-92 30 30)"></circle></svg><span data-icon="mic"></span></span>
+          <span class="pill-btn"><span class="stop-square"></span></span>
+        </div>
+        <button type="button" class="skip-ending" id="skipEnding" aria-label="Skip to walk details"></button>
+      </section>
+
+      <!-- ───────────── Journey: after saving ───────────── -->
+      <section id="s-home" class="screen" data-tab="journey" aria-label="Journey" hidden>
+        <div class="mid-frame">
+          <div class="orb-big" aria-hidden="true"></div>
+          <div class="orb-route" id="homeRoute"></div>
+          <button type="button" class="orb-centre" id="homeOrbBtn" aria-label="Walk again"></button>
+        </div>
+        <div class="home-head">
+          <h1 class="home-title"><button type="button" id="homeTitle"></button></h1>
+          <div class="home-row">
+            <button type="button" class="circle-44 home-again" id="homeAgain" aria-label="Walk again"><span data-icon="arrow-up-sm"></span></button>
+            <button type="button" class="t-small grey home-status" id="homeStatus" hidden></button>
+          </div>
+        </div>
+        <div data-nav="journey"></div>
+      </section>
+
+      <!-- ───────────── Just listen ───────────── -->
+      <section id="s-listen" class="screen" data-tab="journey" aria-label="Listening" hidden>
+        <div class="bg" data-bg="drift"></div>
+        <div class="mid-frame">
+          <div class="orb-wrap" id="listenOrb"><div class="halo sr-halo"></div><div class="orb sr-orb"></div></div>
+        </div>
+        <h1 class="listen-title" id="listenTitle">Nothing nearby yet</h1>
+        <p class="t-small grey listen-sub" id="listenSub">Walk toward a walk on your map</p>
+        <p class="t-sub listen-hint" id="listenHint">Turn toward the sound<br />to hear it more clearly</p>
+        <div class="pill">
+          <span class="pill-btn" role="img" aria-label="Listening"><span data-icon="headphones"></span></span>
+          <button type="button" class="pill-btn" id="listenStop" aria-label="Stop listening"><span class="stop-square" aria-hidden="true"></span></button>
+        </div>
+      </section>
+
+      <!-- ───────────── City ───────────── -->
+      <section id="s-city" class="screen" data-tab="city" aria-label="City" hidden>
+        <div class="map" id="cityMap"></div>
+        <div class="city-head">
+          <h1 class="t-display">City</h1>
+          <p class="t-sub" id="citySummary">Looking around…</p>
+        </div>
+        <button type="button" class="corner-link" id="addCodeBtn">Add code</button>
+        <div class="city-empty" id="cityEmpty" hidden>
+          <p class="t-sub">No public walks nearby yet</p>
+          <button type="button" class="link" id="cityEmptyCode">Add one with a code</button>
+        </div>
+        <div class="area" id="cityArea" hidden>
+          <p class="t-sub area-count" id="areaCount"></p>
+          <div class="carousel" id="areaCards" role="list" aria-label="Walks in this area"></div>
+          <div class="page-dots centred" id="areaDots" aria-hidden="true"></div>
+          <button type="button" class="back" id="areaBack" aria-label="Back to City"><span data-icon="back"></span></button>
+        </div>
+        <div class="code-veil" id="codeVeil" hidden></div>
+        <form class="sheet code-sheet" id="codeSheet" role="dialog" aria-labelledby="codeTitle" hidden novalidate>
+          <h2 class="t-title" id="codeTitle">Add a walk</h2>
+          <div class="code-row">
+            <input class="field" id="codeInput" name="code" aria-label="Share code" placeholder="misty-parrot-0417" autocapitalize="none" autocorrect="off" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="60" />
+            <button type="submit" class="btn btn-56 code-add" id="codeAdd"><span class="label">Add walk</span><span class="spinner" aria-hidden="true"></span></button>
+          </div>
+          <p class="t-small grey code-hint" id="codeHint">Codes look like misty-parrot-0417. A walk added by code stays private to you.</p>
         </form>
-        <div id="codeStatus" class="hint" aria-live="polite"></div>
-        <div id="savedEmpty" class="empty">No saved walks yet. Find some in the City plaza, or enter a share code.</div>
-        <ol id="savedList" class="routes-list"></ol>
+        <div class="found-card" id="foundCard" hidden>
+          <div class="card-meta"><span data-icon="lock"></span><span id="foundMeta"></span></div>
+          <div class="card-title" id="foundTitle"></div>
+          <div class="t-small grey found-code" id="foundCode"></div>
+          <button type="button" class="circle-56 found-play" id="foundPlay" aria-label="Listen"><span data-icon="play"></span></button>
+          <button type="button" class="btn btn-56 found-save" id="foundSave"><span data-icon="heart-sm"></span><span class="label">Save to My map</span></button>
+        </div>
+        <button type="button" class="back" id="foundBack" aria-label="Back to City" hidden><span data-icon="back"></span></button>
+        <div data-nav="city"></div>
       </section>
 
-      <section class="listen" aria-label="Listen Mode">
-        <div class="listen-top">
-          <h2>Listen Mode</h2>
-          <button id="listenToggleBtn" class="btn btn-ghost" type="button" disabled>
-            Enable Listen Mode
-          </button>
+      <!-- ───────────── My map ───────────── -->
+      <section id="s-mymap" class="screen" data-tab="mymap" aria-label="My map" hidden>
+        <div class="map" id="myMap"></div>
+        <div class="mymap-empty-me" id="emptyMe" aria-hidden="true" hidden><span class="me-halo"></span><span class="me-dot"></span></div>
+        <div class="city-head">
+          <h1 class="t-display">My map</h1>
+          <p class="t-sub" id="mymapSummary"></p>
         </div>
-
-        <p class="listen-hint">
-          While you walk, walks nearby fade in from the moment they were recorded at that spot. Follow one to keep hearing it; face a sound to hear it more clearly. Headphones recommended.
-        </p>
-
-        <div id="listenWarn" class="error" hidden></div>
-
-        <div class="listen-status">
-          <div class="status-row">
-            <div class="status-label">Listening to</div>
-            <div id="listenToText" class="status-value">—</div>
+        <button type="button" class="circle-44 account-btn" id="accountBtn" aria-label="Your account"><span data-icon="person"></span></button>
+        <div class="mymap-list" id="mymapList">
+          <div class="segmented" role="tablist">
+            <button type="button" role="tab" id="segMine" aria-selected="true">Mine</button>
+            <button type="button" role="tab" id="segSaved" aria-selected="false">Saved</button>
           </div>
-          <div class="status-row">
-            <div class="status-label">Nearest node</div>
-            <div id="nearestNodeText" class="status-value">—</div>
-          </div>
-          <div class="status-row">
-            <div class="status-label">Distance</div>
-            <div id="distanceText" class="status-value">—</div>
-          </div>
-          <div class="status-row">
-            <div class="status-label">Playback</div>
-            <div id="playbackText" class="status-value">No nearby sound</div>
+          <div class="carousel" id="myCards" role="list"></div>
+        </div>
+        <div class="mymap-empty" id="mymapEmpty" hidden>
+          <p class="t-title">Nothing here yet</p>
+          <p class="t-sub">Record a walk, or save one from the City. Only walks on your map play while you walk.</p>
+          <div class="empty-actions">
+            <button type="button" class="btn btn-56" id="emptyRecord">Record a walk</button>
+            <button type="button" class="btn btn-56 btn-outline" id="emptyCity">Open City</button>
           </div>
         </div>
+        <div data-nav="mymap"></div>
       </section>
 
-      <section class="controls" aria-label="Recording controls">
-        <button id="startBtn" class="btn btn-primary" type="button">Start New Walk</button>
-        <button id="endBtn" class="btn btn-danger" type="button" disabled>End Walk</button>
-      </section>
-
-      <section class="status" aria-label="Status">
-        <div class="status-row">
-          <div class="status-label">Status</div>
-          <div id="statusText" class="status-value">Not recording</div>
-        </div>
-        <div class="status-row">
-          <div class="status-label">Permissions</div>
-          <div id="permText" class="status-value">
-            On iPhone Safari, permissions (motion, microphone, location) are requested after tapping Start.
-          </div>
-        </div>
-        <div class="status-row">
-          <div class="status-label">Account</div>
-          <div id="accountText" class="status-value">Connecting…</div>
-        </div>
-        <div class="status-row">
-          <div class="status-label">Cloud</div>
-          <div id="cloudText" class="status-value">—</div>
-        </div>
-        <div id="errorBox" class="error" hidden></div>
-      </section>
-
-      <section class="metrics" aria-label="Live metrics">
-        <div class="metric">
-          <div class="metric-label">Track points</div>
-          <div id="nodesCount" class="metric-value">0</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Estimated steps</div>
-          <div id="stepsCount" class="metric-value">0</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Estimated position</div>
-          <div class="metric-value">
-            <span id="posX">x=0.00</span>
-            <span class="spacer"></span>
-            <span id="posY">y=0.00</span>
-          </div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Heading</div>
-          <div id="headingVal" class="metric-value">—</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">GPS</div>
-          <div id="gpsText" class="metric-value">—</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Blended position</div>
-          <div id="latLngText" class="metric-value">—</div>
-        </div>
-      </section>
-
-      <section class="preview" aria-label="Route preview">
-        <h2>Estimated route</h2>
-        <canvas id="routeCanvas" width="360" height="360"></canvas>
-        <p class="hint">
-          Steps and compass draw the path; GPS keeps pulling it back to where you really are. Before the first GPS fix, the walk starts at the centre.
-        </p>
-      </section>
-
-      <section class="nodes" aria-label="Walk">
-        <h2>Walk</h2>
-        <div id="nodesEmpty" class="empty">No walk selected.</div>
-        <ol id="nodesList" class="nodes-list"></ol>
-      </section>
-
-      <details class="debug-panel" id="debugPanel">
-        <summary>Debug log (on-device)</summary>
-        <p class="debug-hint">
-          Same messages as <code>console.log</code>; use when Safari has no devtools attached.
-        </p>
-        <div class="debug-actions">
-          <button id="debugClearBtn" class="btn btn-ghost" type="button">Clear log</button>
-        </div>
-        <pre id="debugLogPre" class="debug-log" aria-live="polite"></pre>
-      </details>
-
-      <section class="routes" aria-label="Your account">
-        <div class="routes-top">
-          <h2>Your account</h2>
-        </div>
-        <p id="accountStatus" class="hint">Anonymous: your walks are kept in this browser.</p>
-        <div id="accountAnon">
-          <p class="hint">
-            Link an email to keep your walks if this browser's data is cleared, and to use them on another device.
-          </p>
-          <form id="linkForm" class="code-form" autocomplete="on">
-            <input id="linkEmail" class="code-input" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email" required />
-            <button class="btn btn-ghost btn-small" type="submit">Keep my walks</button>
+      <!-- ───────────── Your account ───────────── -->
+      <section id="s-account" class="screen" data-tab="mymap" aria-label="Your account" hidden>
+        <div class="bg" data-bg="drift"></div>
+        <h1 class="t-display account-title">Your<br />account</h1>
+        <div class="account-body">
+          <form class="card account-card" id="accAnon" novalidate>
+            <div class="acc-state"><span class="acc-dot" aria-hidden="true"></span><span id="accAnonTitle">Anonymous on this phone</span></div>
+            <p class="t-small grey acc-note" id="accAnonNote">Safari can clear a website’s data after a week without a visit. Link an email to keep your walks and use them on another phone.</p>
+            <label class="t-small acc-label" for="emailInput">Email</label>
+            <input class="field" id="emailInput" type="email" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="you@example.com" enterkeyhint="send" />
+            <p class="t-small acc-error" id="emailError" hidden>Check the email address</p>
+            <button type="submit" class="btn btn-56 acc-submit" id="emailSubmit">Link email</button>
           </form>
-          <details class="signin-other">
-            <summary>Already linked an email on another device?</summary>
-            <form id="signInForm" class="code-form" autocomplete="on">
-              <input id="signInEmail" class="code-input" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email to sign in" required />
-              <button class="btn btn-ghost btn-small" type="submit">Sign in</button>
-            </form>
-          </details>
+          <form class="card account-card" id="accSent" hidden novalidate>
+            <span data-icon="envelope"></span>
+            <h2 class="t-title acc-sent-title">Check your email</h2>
+            <p class="t-sub acc-sent-note" id="sentNote"></p>
+            <p class="t-small grey acc-code-label">Or type the 6-digit code from the email</p>
+            <div class="code-row">
+              <input class="field otp" id="otpInput" inputmode="numeric" autocomplete="one-time-code" maxlength="6" aria-label="6-digit code" enterkeyhint="done" />
+              <button type="submit" class="btn btn-56 otp-confirm" id="otpConfirm">Confirm</button>
+            </div>
+            <p class="t-small acc-error" id="otpError" hidden>That code didn’t work. Check the email and try again.</p>
+          </form>
+          <div class="card account-card" id="accLinked" hidden>
+            <div class="acc-state"><span class="acc-check" aria-hidden="true"><span data-icon="check-sm"></span></span><span id="linkedTitle"></span></div>
+            <p class="t-small grey acc-note">Your walks are kept with this email. Sign in with it on another phone to hear them there.</p>
+            <button type="button" class="btn btn-56 btn-outline" id="signOutBtn">Sign out</button>
+          </div>
+          <p class="t-small grey acc-resend" id="accResend" hidden></p>
+          <div class="acc-rows" id="accRows">
+            <button type="button" class="acc-row" id="signInRow"><span id="signInRowText">Sign in with an email you linked before</span><span data-icon="chevron"></span></button>
+            <button type="button" class="acc-row" id="homeScreenRow">Add to Home Screen<span data-icon="chevron"></span></button>
+          </div>
+          <p class="t-small grey acc-warn" id="accWarn" hidden>Walks recorded anonymously on this phone won’t move to that account.</p>
         </div>
-        <button id="haveCodeBtn" class="link-btn have-code" type="button" hidden>Have a code?</button>
-        <form id="otpForm" class="code-form" autocomplete="one-time-code" hidden>
-          <input id="otpInput" class="code-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="6-digit code" aria-label="Code from the email" />
-          <button class="btn btn-ghost btn-small" type="submit">Confirm</button>
-        </form>
-        <div id="accountLinked" hidden>
-          <button id="signOutBtn" class="btn btn-ghost btn-small" type="button">Sign out</button>
-        </div>
-        <div id="accountMsg" class="hint" aria-live="polite"></div>
+        <button type="button" class="back" data-back aria-label="Back to My map"><span data-icon="back"></span></button>
       </section>
 
-      <section class="downloads" aria-label="Downloads">
-        <div class="downloads-top">
-          <h2>Downloads</h2>
-          <button id="downloadAllAudioBtn" class="btn btn-ghost" type="button" disabled>
-            Download all walk audio
-          </button>
-        </div>
-        <p class="hint">
-          Downloads cover your walks: the route as a picture and the full recording.
-        </p>
-        <div id="downloadsEmpty" class="empty">No saved routes to download yet.</div>
-        <ol id="downloadRoutesList" class="download-routes-list"></ol>
-        <div id="downloadStatus" class="download-status" aria-live="polite"></div>
-      </section>
-
-      <footer class="footer">
-        <p class="footnote">
-          Tip: keep the phone in a consistent orientation while walking for better heading.
-        </p>
-      </footer>
-
-      </div>
-
-      <div id="plazaView" hidden>
-        <section class="plaza" aria-label="City plaza">
-          <div class="plaza-top">
-            <div>
-              <h2>City plaza</h2>
-              <div id="plazaSummary" class="hint">Loading…</div>
-            </div>
-            <div class="plaza-actions">
-              <button id="plazaNearBtn" class="btn btn-ghost btn-small" type="button">Near me</button>
-              <button id="plazaAllBtn" class="btn btn-ghost btn-small" type="button">All</button>
-            </div>
-          </div>
-          <canvas id="plazaCanvas" class="plaza-canvas" aria-label="Map of public walks as lights"></canvas>
-          <p class="hint">
-            Each light is a public walk, placed roughly (to about 200 m). Brighter means more walks.
-            Drag to move, pinch to zoom, tap a light to see its walks.
-          </p>
-        </section>
-        <section class="routes" aria-label="Walks here">
-          <div class="routes-top">
-            <h2 id="plazaListTitle">Walks here</h2>
-          </div>
-          <div id="plazaListEmpty" class="empty">Tap a light to see the walks there.</div>
-          <ol id="plazaList" class="routes-list"></ol>
-        </section>
-      </div>
-    </main>
-
-    <div id="guide" class="guide" role="dialog" aria-modal="true" aria-labelledby="guideTitle" hidden>
-      <div class="guide-card">
-        <div class="guide-dots" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-
-        <div class="guide-step" data-step="0">
-          <h2 id="guideTitle">Hi, this is Parrot.</h2>
-          <p>Walk anywhere and record up to 5 minutes of your journey: your voice and the sounds around you.</p>
-          <p>Later, people who walk the same streets hear what you left behind, at the spot where you recorded it. Turn towards a sound to hear it more clearly.</p>
-          <p class="guide-note">Put on headphones. In the concept, the phone rides in a parrot on your shoulder.</p>
-        </div>
-
-        <div class="guide-step" data-step="1" hidden>
-          <h2>Three permissions</h2>
-          <p>Your phone asks for these when you tap Start New Walk:</p>
-          <ul class="guide-list">
-            <li><strong>Motion &amp; orientation</strong> — which way you face and when you take a step.</li>
-            <li><strong>Microphone</strong> — records your walk, surroundings included.</li>
-            <li><strong>Location</strong> — places each sound where it was recorded.</li>
-          </ul>
-          <p class="guide-note">Walks are private until you choose to share them, and the first 30 m of every walk are left out so your starting point stays yours.</p>
-        </div>
-
-        <div class="guide-step" data-step="2" hidden>
-          <h2>Keep your walks</h2>
-          <p id="guideHomeText">Add SoundRoute to your Home Screen: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>. Safari can clear a website's data after a week without a visit; Home Screen apps keep it.</p>
-          <p class="guide-note">You can also link an email under Your account to use your walks on another device.</p>
-        </div>
-
-        <div class="guide-step" data-step="3" hidden>
-          <h2>Find something to hear</h2>
-          <p>You only hear your own walks and walks you save. Save a few before you head out.</p>
-          <div class="guide-choices">
-            <button id="guidePlaza" class="btn btn-ghost btn-small" type="button">Explore the City plaza</button>
-            <button id="guideCode" class="btn btn-ghost btn-small" type="button">I have a share code</button>
-            <button id="guideRecord" class="btn btn-ghost btn-small" type="button">Record my own walk first</button>
-          </div>
-        </div>
-
-        <div class="guide-nav">
-          <button id="guideSkip" class="link-btn" type="button">Skip</button>
-          <button id="guideNext" class="btn btn-primary btn-small" type="button">Next</button>
+      <!-- ───────────── Shared layers ───────────── -->
+      <div class="veil" id="veil" hidden></div>
+      <div class="dialog" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" hidden>
+        <h2 class="t-title" id="dialogTitle"></h2>
+        <p class="t-sub" id="dialogText"></p>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-56 btn-outline" id="dialogNo"></button>
+          <button type="button" class="btn btn-56" id="dialogYes"></button>
         </div>
       </div>
+      <form class="sheet report-sheet" id="reportSheet" role="dialog" aria-modal="true" aria-labelledby="reportTitle" hidden>
+        <h2 class="t-title" id="reportTitle">Report this walk</h2>
+        <p class="t-small grey">After three people report it, the walk is hidden until it’s reviewed. The walker isn’t told who reported it.</p>
+        <div class="radios" role="radiogroup" aria-label="Reason">
+          <label><input type="radio" name="reason" value="Offensive or hateful" /><span class="radio" aria-hidden="true"></span>Offensive or hateful</label>
+          <label><input type="radio" name="reason" value="Records a private conversation" /><span class="radio" aria-hidden="true"></span>Records a private conversation</label>
+          <label><input type="radio" name="reason" value="Spam, or not really a walk" /><span class="radio" aria-hidden="true"></span>Spam, or not really a walk</label>
+          <label><input type="radio" name="reason" value="Something else" /><span class="radio" aria-hidden="true"></span>Something else</label>
+        </div>
+        <div class="report-actions">
+          <button type="button" class="text-btn" id="reportCancel">Cancel</button>
+          <button type="submit" class="btn btn-69" id="reportSend" disabled>Send report</button>
+        </div>
+      </form>
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden><span data-icon="check"></span><span id="toastText"></span><button type="button" class="toast-undo" id="toastUndo" hidden>Undo</button></div>
+      <div class="offline" id="offline" role="status" hidden>Offline. Walks will upload when you’re back.</div>
     </div>
+
+    <details class="debug" id="debug" hidden>
+      <summary>Debug log</summary>
+      <pre id="debugLogPre" aria-live="off"></pre>
+    </details>
 
     <script src="./app.js" type="module"></script>
   </body>

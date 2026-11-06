@@ -68,7 +68,7 @@ class Query {
         let r = db.routes.find((x) => x.id === this.row.id);
         if (!r) {
           const n = db.routes.length;
-          r = { owner: me, is_public: false, share_code: `${ADJ[n % 5]}-${NOUN[n % 5]}-0${n}42`, created_at: new Date().toISOString(), audio_path: null, ...this.row };
+          r = { owner: me, is_public: false, hidden: false, share_code: `${ADJ[n % 5]}-${NOUN[n % 5]}-0${n}42`, created_at: new Date().toISOString(), audio_path: null, ...this.row };
           db.routes.push(r);
         } else if (r.owner === me) Object.assign(r, this.row);
         else return { data: null, error: { message: "permission denied" } };
@@ -205,6 +205,11 @@ export function createClient() {
           cells.set(k, { lat, lng, walks: (cells.get(k)?.walks || 0) + 1 });
         }
         return { data: [...cells.values()], error: null };
+      }
+      if (fn === "save_count") {
+        const r = db.routes.find((x) => x.id === args.route);
+        if (!r || r.owner !== uid()) return { data: 0, error: null };
+        return { data: db.saves.filter((s) => s.route_id === r.id && s.user_id !== uid()).length, error: null };
       }
       return { data: null, error: { message: `unknown function ${fn}` } };
     },

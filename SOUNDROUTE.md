@@ -4,14 +4,16 @@
 
 ## 0. 现在的状态（一句话版）
 
-七个开发阶段的代码都已完成，全部在 `v2` 分支上。阶段 1–4（定位、记录、上传、收听）已在 iPhone 上实测通过；阶段 5–7（我的地图、城市广场、引导/账号/举报）只通过了模拟测试，**还没在手机上测**。正式站还是旧版本，等 `v2` 合并到 `main` 并部署后才会更新。
+更新于 2026-11-06。**界面已按 Blue 设计重写**（`design/blue-spec.md`，画布 https://claude.ai/artifact/Ek4qm3GXiRxHM87qrEbj3G Blue 页），代码在 `v2` 上，**还没提交、没在手机上测**。定位、录音、收听、上传这些底层逻辑没改算法，只从旧 `app.js` 搬进了 `walker.js`。四组测试（§9）全部通过，但都是模拟环境。
 
 **接下来要做的事，按顺序：**
 
-1. 在 Supabase 后台完成阶段 7 的三项设置（见 §6）。
-2. 在手机上测试阶段 5–7（见 §7 的清单）。
+1. 在 Supabase SQL Editor 重新运行 `supabase/soundroute.sql`（新增 `save_count()`，删除旅程前显示“有几人收藏”；没运行时会退回通用文案，不报错）。之前阶段 7 的三项设置（§6）如果还没做，一起做。
+2. 提交、推送 `v2`，在 Cloudflare 重新构建 soundroute-preview，用 iPhone 按 §7 测试。
 3. 修复测出来的问题。
-4. 把 `v2` 合并到 `main`，部署正式站（见 §8）。
+4. 把 `v2` 合并到 `main`，部署正式站（§8）。
+
+**Blue 版还没做的：** 地点名（反向地理编码）没接，详情页只显示时间和时长；City 里“Show in City”按钮没做；深色模式不跟随（规格里定为只做浅色）。
 
 ## 1. 项目是什么
 
@@ -23,7 +25,7 @@
 - **收听**：走到别人录音的地方，就能听到他们当时在那里录下的声音；沿路线走就一直播放，转身朝向声音会听得更清楚。
 - **切换**：多条旅程同时在附近时，声音会在它们之间交叉淡化切换。
 - **我的地图**：我录的旅程和我收藏的旅程。只有这两类会在走路时播放，陌生人的声音不会突然出现。
-- **城市广场**：公开的旅程在黑底上显示为模糊的光点（类似夜晚的城市灯光），可以试听和收藏。
+- **City**：公开的旅程在蓝白底上显示为蓝色光区（越蓝越多），点开一片光区看那里的旅程卡片，可以试听和收藏。界面设计见 `design/blue-spec.md`。
 
 硬件概念保留：网页可以独立使用，但设想中手机放进肩上的鹦鹉，不用手持，麦克风朝外，朝向也更稳定。
 
@@ -54,18 +56,20 @@
 
 ## 4. 代码结构
 
-### `soundtrack/`（网页，约 3,800 行 JS）
+### `soundtrack/`（网页，约 4,500 行 JS）
 
 | 文件 | 作用 |
 |---|---|
-| `index.html` | 单页界面：两个标签页 My map / City plaza、首次引导弹窗 `#guide`、Your account 区域 |
-| `style.css` | 样式；按钮用 `.btn`，紧凑按钮加 `.btn-small` |
-| `manifest.webmanifest`、`icons/` | 添加到主屏幕（PWA）；图标是原创的（暖色光点加声波） |
-| `app.js` | 主程序：传感器与计步、录音与轨迹点、绘图、收听调度、上传与删除、收藏与分享、城市广场界面、账号界面、引导 |
+| `index.html` | 每个画板一个 `<section class="screen" id="s-…">`：guide、intro、perms、gps、walking、walk（Ending/新旅程/我的旅程/别人的旅程共用）、home、listen、city、mymap、account；对话框、举报弹窗、toast 是共用层。图标和背景由 app.js 填入 |
+| `style.css` | Blue 样式。整个界面按 390×844 画板排版，app.js 按手机宽度缩放（`--s`）并设高度（`--h`）；居中的光球放在 `.mid-frame` 里。尺寸规范见文件开头注释 |
+| `manifest.webmanifest`、`icons/` | 添加到主屏幕；图标是白底蓝色光球 |
+| `app.js` | 界面：页面栈和转场（`go` / `back` / `switchTab`）、各页面渲染、City/My map、账号、引导、上传与载入 |
+| `walker.js` | 走路引擎（无 DOM）：权限请求、传感器与计步、GPS 融合、录音（可暂停）、轨迹点、收听调度。通过 `hooks` 通知界面 |
+| `orb.js` | 把一段旅程画进光球：裁掉起点 30 米、简化、平滑；找出“经过的别人的旅程”（25 米内） |
+| `citymap.js` | City 和 My map 的蓝白地图：光区、路线、“我”，拖动/双指缩放/点按 |
 | `location.js` | `LocationFusion`：GPS 与步数、指南针的卡尔曼式融合。本地坐标系单位为米（x = 东，y = 北），由第一个 GPS 信号锚定到经纬度 |
 | `listen.js` | 收听。`decideListen()` 是纯决策函数（开始、保持、重新对齐、切换、停止），不碰音频，方便测试；`ListenPlayer` 用两个播放器做交叉淡化，音量通过 Web Audio 增益节点控制（iPhone 会忽略 `<audio>.volume`），并预先缓存附近录音；参数都在 `LISTEN_CONFIG` |
-| `plaza.js` | `PlazaMap`：城市广场画布。Web Mercator 投影，无底图；拖动、双指缩放、滚轮缩放、点击选中；比例尺；“你在这里”标记 |
-| `cloud.js` | 云端数据：上传（含隐去起点 `withoutPrivateStart`）、载入我的和收藏的旅程、签名音频链接、删除、收藏/取消收藏、分享码收藏、改名、公开或私密、举报、广场数据 |
+| `cloud.js` | 云端数据：上传（含隐去起点 `withoutPrivateStart`）、载入我的、收藏的和公开的旅程（`loadPublicWalks`）、签名音频链接、删除、收藏/取消收藏、分享码收藏、改名、公开或私密、举报、广场格子、收藏人数（`saveCount`） |
 | `supabase.js` | Supabase 客户端（publishable key，可以放在前端）、匿名登录、数据库检查、邮箱绑定/登录/退出 |
 | `localstore.js` | IndexedDB：上传完成前把旅程存在手机上，断网不丢 |
 | `wrangler.toml` | Cloudflare 静态资源部署（Worker 名 `soundroute`） |
@@ -84,23 +88,21 @@
 ```js
 {
   id, name, createdAt, durationS, audioMime, audioBlob?, audioUrl, audioPath?,
-  cloud: "pending" | "uploading" | "saved" | "failed" | "device",
-  isPublic, hidden, shareCode, fromCloud?,
+  cloud: "draft" | "pending" | "uploading" | "saved" | "failed" | "device",
+  isPublic, hidden, shareCode, centerLat?, centerLng?, fromCloud?,
   nodes: [ { id, t /* 录音秒数 */, timestamp, stepCount, heading, x, y, lat, lng, uncertaintyM } ]
 }
 ```
 
-- `routes`：我的旅程（云端载入的、本地待上传的、本次录的）。
-- `savedWalks`：收藏的别人的旅程。
-- `allWalks()`：以上两者合并，收听和地图叠加都用它。
-- `currentRecordingRoute`：正在录的旅程。
-- `nodes` 就是每 2 秒一个的轨迹点。`x`/`y` 是本次会话坐标系里的米；云端载入的旅程由 `projectWalks()` 从经纬度换算出 x/y。
+- `routes`：我的旅程；`savedWalks`：收藏的；`publicWalks`：City 用的公开旅程；`homeWalk`：Journey 首页显示的那段；`draftWalk`：刚录完、还没保存或丢弃的。
+- 页面栈：`stacks.journey / city / mymap`，每个标签页一个；`go()` 推入（右侧推入 0.35s），`back()` 返回，`switchTab()` 切标签（淡入 0.2s）。
 
 ### 主要流程
 
-- **记录**：`startNewWalk()` → `startRecordingSession()`（先请求运动和方向权限，再请求麦克风，顺序不能改）→ 一个 MediaRecorder 连续录音，每 2 秒 `recordTrackPoint()` → 5 分钟自动 `endWalk()` → 命名 → `keepAndUpload()`：先存 IndexedDB，再 `cloud.uploadWalk()`。
-- **收听**：`updateListenMode()` 每 300 毫秒调用一次 `decideListen()`，再驱动 `ListenPlayer`。规则：走近旅程（20 米内、大致在前方）就从对应秒数淡入；沿路线走则连续播放；播放进度和所在位置相差超过 12 秒时重新对齐；另一条旅程明显更近（差 8 米以上）时交叉淡化切换；离开 28 米后淡出；播完的旅程休息 45 秒。音量由距离和朝向共同决定。
-- **启动**：`loadPendingWalks()` → `connectCloud()`（匿名登录、数据库检查）→ `loadMyWalks()`（我的旅程和收藏的旅程，生成签名音频链接，每 40 分钟续期，重传未完成的上传）→ `renderAccount()`。
+- **记录**：Intro 的 ↑（或 Home 的 ↑、引导第 4 页）→ 第一次进 `BluePermissions`，之后直接 `askAndGo()`：在同一次点击里 `walker.requestPermissions()`（先运动和方向，再麦克风，再定位，顺序不能改）→ GPS 页等到精度够的定位（20 秒后出现 Start anyway）→ `walker.startRecording()`。录音中可暂停；不到 10 秒结束会问 “Too short to keep”；5 分钟自动结束。结束时立刻播放 Ending（约 9.4 秒，点屏幕跳过），同时把录音存进 IndexedDB 作为草稿 → Save 才加入我的旅程并上传；Discard 删除草稿。
+- **收听**：录音时一直开着收听。`Just listen` 只开定位和传感器，不开麦克风。My map 卡片或 My walk 的播放按钮从头播放一段（不需要走到那里）。规则不变：走近旅程（20 米内、大致在前方）就从对应秒数淡入；沿路线走则连续播放；进度和位置相差超过 12 秒重新对齐；另一条明显更近（差 8 米以上）交叉淡化切换；离开 28 米淡出；播完休息 45 秒。
+- **启动**：`loadPendingWalks()` → `connectCloud()`（匿名登录、数据库检查）→ `loadMyWalks()`（我的和收藏的旅程，签名音频链接每 40 分钟续期，重传未完成的上传）。联网恢复时也会重传。
+- **分享码**：City 的 Add code 先调用 `save_by_code` 收藏，显示找到的卡片；用户返回而没点 Save to My map 时再取消收藏（原本就收藏过的不动）。链接里带 `?code=…` 会直接打开这个弹窗。
 
 ## 5. 数据库（Supabase）
 
@@ -138,17 +140,14 @@
 
 先在 Cloudflare 打开 Worker **soundroute-preview** → Deployments → **重新构建**（推送后不会自动构建）。用 iPhone 的 Safari 打开测试站，戴耳机，在户外测试。
 
-- [x] **阶段 1–4**：匿名登录、GPS 定位、记录 5 分钟内的旅程、上传、刷新后保留、删除、沿原路收听、转身音量变化、离开后淡出（已通过）。
-- [ ] **阶段 5 我的地图**：把一段旅程设为公开，再改个名字。复制另一段私密旅程的分享码。
-- [ ] **阶段 6 城市广场**：用无痕窗口当作第二个人，在广场里看到光点，点开后试听、收藏；用分享码收藏那段私密旅程；开启收听沿路线走，能听到收藏的旅程。回到自己这边删除公开的旅程，无痕窗口那边刷新后它应该消失。
-- [ ] **阶段 7**：
-  - 无痕窗口打开时出现首次引导；
-  - 添加到主屏幕后，从图标打开像一个应用；
-  - 绑定邮箱：点邮件里的链接，回到页面刷新后，Your account 显示 “Linked to…”；
-  - 在另一个浏览器用同一个邮箱登录，能看到同样的旅程；
-  - 用无痕窗口举报一段公开旅程。
+- [x] **阶段 1–4**（旧界面下通过）：匿名登录、GPS 定位、记录、上传、刷新后保留、删除、沿原路收听、转身音量变化、离开后淡出。**Blue 界面下要重新测一遍。**
+- [ ] **Blue：外观**：各页面在 iPhone 上的位置是否和画布一致（小屏 iPhone SE、大屏 Pro Max 各看一次）；底部导航和 Home 指示条不打架；输入分享码、邮箱时弹窗跟着键盘上移。
+- [ ] **Blue：Journey**：第一次点 ↑ 进 Before you walk，三次授权依次弹出；GPS 页找到定位后自动开始；话筒圈随时间变长、点话筒能暂停；■ 后看到路线被画出来（点屏幕可跳过）；改名、Save、回到 Home；Discard 会先确认。
+- [ ] **Blue：收听**：Just listen 走近收藏的旅程，标题换成它的名字；My map 卡片的播放能坐着听。
+- [ ] **Blue：分享**：把一段旅程设为公开，复制另一段私密旅程的分享码。用无痕窗口当作第二个人：City 里看到光区，点开、卡片试听、进详情收藏；Add code 输错有抖动和提示，输对后 Save to My map；沿路线走能听到收藏的旅程。回到自己这边删除公开的旅程，提示里写有人收藏，无痕窗口刷新后它消失。
+- [ ] **阶段 7**：无痕窗口打开时出现引导；添加到主屏幕后像一个应用（新图标）；绑定邮箱：点邮件里的链接，回来后 Your account 显示 “Linked to…”；另一个浏览器用同一邮箱登录能看到同样的旅程；用无痕窗口举报一段公开旅程。
 
-页面底部的 **Debug log** 显示设备上的日志（`[gps]`、`[audio]`、`[cloud]`、`[listen]`、`[plaza]` 等），手机上排查问题时把它截图或复制下来。
+网址后面加 `?debug` 会在页面底部显示 **Debug log**（`[gps]`、`[audio]`、`[cloud]`、`[listen]`、`[plaza]` 等），手机上排查问题时把它截图或复制下来。
 
 ## 8. 部署流程
 
@@ -174,10 +173,12 @@ npx wrangler deploy
 pip install playwright && playwright install chromium
 (cd soundtrack && python3 -m http.server 8765) &
 node tests/soundroute/decide.test.mjs      # 收听决策单元测试
-python3 tests/soundroute/run.py            # 录音 → 上传 → 刷新 → 收听 → 离线重传 → 删除
-python3 tests/soundroute/share.py          # 两个人：公开、广场、试听、收藏、分享码、取消收藏、作者删除
-python3 tests/soundroute/polish.py         # 引导、主屏幕横幅、隐去起点、三人举报隐藏、邮箱绑定
+python3 tests/soundroute/run.py            # 太短提示 → 录音 → Ending → 改名保存 → 刷新 → 收听 → 离线重传 → 删除
+python3 tests/soundroute/share.py          # 两个人：公开、City 光区、试听、收藏、分享码、Undo、作者删除
+python3 tests/soundroute/polish.py         # 引导、加到主屏幕、隐去起点、三人举报隐藏、邮箱绑定
 ```
+
+三个浏览器测试共用 `tests/soundroute/blue.py`（走一段、换人、点光区等操作）。每项检查打印 `ok` 或 `FAIL`，有失败时退出码非 0，并在 `out/failure.png` 留下截图和日志末尾。
 
 较新的 Chromium（156 起）也实现了 `DeviceMotionEvent.requestPermission()`，无头模式下默认返回 denied，所以三个浏览器测试在 `new_context` 里额外授予了 `accelerometer`、`gyroscope`、`magnetometer` 权限。
 
@@ -193,10 +194,10 @@ python3 tests/soundroute/polish.py         # 引导、主屏幕横幅、隐去�
 | `LISTEN_CONFIG.resyncSeconds` | `listen.js` | 12 秒 | 播放与位置相差多少时重新对齐 |
 | `LISTEN_CONFIG.cooldownMs` | `listen.js` | 45 秒 | 播完的旅程休息多久 |
 | `maxAccuracyM`、`stepVarianceM2`、`timeVarianceM2PerS` | `location.js` | 50 / 0.15 / 1.0 | GPS 融合：忽略多差的 GPS、步数和时间带来的不确定性 |
-| `MAX_WALK_SECONDS`、`POINT_INTERVAL_MS`、`AUDIO_BITS_PER_SECOND` | `app.js` | 300 秒 / 2 秒 / 32 kbps | 录音时长、轨迹点间隔、码率 |
+| `MAX_WALK_SECONDS`、`POINT_INTERVAL_MS`、`AUDIO_BITS_PER_SECOND` | `walker.js` | 300 秒 / 2 秒 / 32 kbps | 录音时长、轨迹点间隔、码率 |
 | `PRIVATE_START_M` | `cloud.js` | 30 米 | 上传时隐去的起点距离 |
-| `PREVIEW_SECONDS` | `app.js` | 20 秒 | 广场试听时长 |
-| 网格大小 | `soundroute.sql` 的 `get_plaza_cells()` 与 `cloud.js` 的 `PLAZA_CELL` | 0.0018° × 0.0029°（约 200 米） | 两处必须一致 |
+| `PREVIEW_SECONDS`、`SHORT_WALK_SECONDS`、`GPS_PATIENCE_MS` | `app.js` | 20 秒 / 10 秒 / 20 秒 | 试听时长、多短算太短、多久后出现 Start anyway |
+| 网格大小 | `soundroute.sql` 的 `get_plaza_cells()`、`cloud.js` 与 `app.js` 的 `PLAZA_CELL` | 0.0018° × 0.0029°（约 200 米） | 三处必须一致 |
 | 举报隐藏阈值、每日上限 | `soundroute.sql` | 3 次；30 段旅程 / 20 次举报 | — |
 
 ## 11. 已知限制与注意事项
@@ -207,7 +208,7 @@ python3 tests/soundroute/polish.py         # 引导、主屏幕横幅、隐去�
 - **iPhone 的音频**：录音时，播放声音可能从听筒出来、音量很小，测试时要戴耳机。开始录音会打断 Web Audio 输出，代码会自动恢复（`ListenPlayer.resume()`）。
 - **匿名身份**：Safari 网页长期不访问可能会清除数据（含匿名身份），所以引导用户添加到主屏幕或绑定邮箱。在新设备用邮箱登录时，该设备上匿名录的旅程不会合并过去（页面会先警告）。
 - **短旅程的起点**：很短的旅程（不到 90 米）只隐去全程的三分之一，而不是完整的 30 米。
-- **城市广场没有底图**，所以看不到街道名称。如果需要，可以加 MapLibre 深色底图（需要地图瓦片服务）。
+- **City 没有底图**，故意不显示街道和区域名称（隐私）。旅程详情里也还没有地点名（需要反向地理编码服务）。
 - 没有加 Service Worker，所以没有离线界面；好处是更新后不会被旧缓存卡住。
 - 仓库里误提交了 `node_modules`（约 6 万个文件），克隆很慢。可以清理，但会影响作品集主站，要单独处理。
 - `/home/claude/yujing949/...` 之类的路径是之前云端会话里的临时副本，与仓库无关。

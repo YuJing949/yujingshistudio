@@ -1,130 +1,138 @@
-"""End-to-end test for My map (phase 5) and City plaza (phase 6), two people.
+"""End-to-end test for sharing, two people: My map, City, codes, saving.
 
 Usage (from the repo root, server running as for run.py):
     python3 tests/soundroute/share.py
 
 Person A records two walks, renames one and makes it public, keeps the other
-private. Person B finds the public walk in the City plaza, previews and saves
-it, saves the private one by share code, hears a saved walk while walking,
-then removes one. Screenshots: tests/soundroute/out/plaza.png, saved.png
+private. Person B finds the public walk in the City, previews it, saves it
+from its details, adds the private one by share code, hears a saved walk
+while walking, then removes one (with Undo). A deletes the public walk and it
+disappears for B. Screenshots: out/city.png, area.png, found.png, saved.png
 """
 import os
-from playwright.sync_api import sync_playwright
+import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-FAKE = open(os.path.join(HERE, "fake-supabase.js")).read()
-BASE = "http://localhost:8765/index.html"
-START = (51.48650, -0.12350)
-OUT = os.path.join(HERE, "out")
-os.makedirs(OUT, exist_ok=True)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from blue import START, check, run  # noqa: E402
 
-with sync_playwright() as p:
-    b = p.chromium.launch(args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"])
-    ctx = b.new_context(viewport={"width": 390, "height": 844}, geolocation={"latitude": START[0], "longitude": START[1], "accuracy": 8}, permissions=["geolocation", "microphone", "accelerometer", "gyroscope", "magnetometer"])
-    ctx.add_init_script("try { localStorage.setItem('soundroute-guide','seen'); localStorage.setItem('soundroute-home-banner','dismissed'); } catch (e) {}")
-    ctx.route("**/cdn.jsdelivr.net/**", lambda r: r.fulfill(status=200, content_type="application/javascript", body=FAKE))
-    answers = []
-    pg = ctx.new_page()
-    errors = []
-    pg.on("pageerror", lambda e: errors.append(str(e)))
-    pg.on("dialog", lambda d: d.accept(answers.pop(0) if (d.type == "prompt" and answers) else None) if d.type == "prompt" else d.accept())
 
-    def orient(h=0):
-        pg.evaluate(f"()=>{{const e=new Event('deviceorientation');Object.defineProperty(e,'webkitCompassHeading',{{value:{h}}});window.dispatchEvent(e)}}")
-
-    def walk(name, seconds, lng=START[1], listen=False):
-        ctx.set_geolocation({"latitude": START[0], "longitude": lng, "accuracy": 8})
-        if listen:
-            pg.click("#listenToggleBtn")
-        pg.click("#startBtn")
-        pg.wait_for_timeout(3500)
-        lat = START[0]
-        heard = []
-        for _ in range(seconds):
-            lat += 0.000012
-            ctx.set_geolocation({"latitude": lat, "longitude": lng, "accuracy": 8})
-            orient()
-            pg.wait_for_timeout(1000)
-            heard.append(pg.inner_text("#playbackText"))
-        answers.append(name)
-        pg.click("#endBtn")
-        pg.wait_for_timeout(3000)
-        return heard
-
-    def walk_panel():
-        return pg.inner_text("#nodesList").replace("\n", " | ")
-
-    def as_person(user_id):
-        pg.evaluate(f"localStorage.setItem('fake-uid', '{user_id}')")
-        pg.reload()
-        pg.wait_for_timeout(2500)
-
-    pg.goto(BASE)
-    pg.wait_for_timeout(500)
-    as_person("person-a")
+def test(app):
+    pg = app.pg
+    app.goto()
+    app.as_person("person-a")
 
     # ── Person A ──
-    walk("Canal walk", 8)
-    walk("Secret garden", 6, lng=START[1] + 0.02)  # ~1.4 km east: a second plaza cell
-    pg.click("#routesList li:has-text('Canal walk') button")
-    answers.append("Canal at dusk")
-    pg.click("#nodesList button:has-text('Rename')")
+    app.walk("Canal walk", 12)
+    app.walk("Secret garden", 12, lng=START[1] + 0.02)  # ~1.4 km east
+    app.open_my_walk("Canal walk")
+    pg.click("#penBtn")
+    pg.fill("#renameInput", "Canal at dusk")
+    pg.click("#walkCorner")  # Done
+    pg.wait_for_timeout(600)
+    check("rename from My walk", app.text("#walkTitleBtn") == "Canal at dusk")
+    pg.click("#publicSwitch")
+    pg.wait_for_timeout(600)
+    check("public switch on", pg.get_attribute("#publicSwitch", "aria-checked") == "true" and app.text("#publicNote").startswith("On:"))
+    db = app.db()
+    row = next(r for r in db["routes"] if r["name"] == "Canal at dusk")
+    check("rename and public saved in the cloud", row["is_public"] is True)
+    pg.click("#walkBack")
     pg.wait_for_timeout(500)
-    pg.click("#nodesList button:has-text('Make public')")
-    pg.wait_for_timeout(500)
-    print("A1 public walk:", walk_panel()[:160])
-    pg.click("#routesList li:has-text('Secret garden') button")
-    secret_code = pg.inner_text("#nodesList").split("Share code")[1].split("\n")[1].strip()
-    print("A2 private walk code:", secret_code)
+    app.open_my_walk("Secret garden")
+    secret_code = app.text("#shareCode")
+    check("private walk has a share code", "-" in secret_code, secret_code)
+    pg.click("#copyBtn")
+    pg.wait_for_timeout(200)
+    check("Copy says Copied", app.text("#copyBtn") == "Copied")
 
-    # ── Person B ──
-    as_person("person-b")
-    print("B1 my walks:", pg.inner_text("#routesList") or "(none)", "| saved:", pg.inner_text("#savedEmpty")[:40])
-    pg.click("#tabPlaza")
+    # ── Person B (standing where A's first walk began) ──
+    app.here = {"latitude": START[0], "longitude": START[1], "accuracy": 8}
+    app.ctx.set_geolocation(app.here)
+    app.as_person("person-b")
+    app.tab("mymap")
+    check("B starts with an empty My map", app.visible("#mymapEmpty"))
+    app.tab("city")
     pg.wait_for_timeout(1500)
-    print("B2 plaza:", pg.inner_text("#plazaSummary"))
-    pg.screenshot(path=os.path.join(OUT, "plaza.png"))
-    box = pg.locator("#plazaCanvas").bounding_box()
-    pg.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-    pg.wait_for_timeout(1200)
-    print("B3 walks in the light:", pg.inner_text("#plazaList").replace("\n", " | "))
-    pg.click("#plazaList button:has-text('Listen')")
+    check("City counts the public walk nearby", app.text("#citySummary") == "1 walk nearby", app.text("#citySummary"))
+    check("a light is drawn", pg.locator("#cityMap .glow").count() == 1)
+    app.shot("city")
+    app.tap_city_light()
+    check("tapping the light opens its walks", app.visible("#areaCount") and app.text("#areaCount") == "1 walk here", app.text("#areaCount") if app.visible("#areaCount") else "")
+    check("card shows the walk", "Canal at dusk" in app.text("#areaCards"))
+    check("its route is highlighted", pg.locator("#cityMap .route.is-selected").count() == 1)
+    pg.locator("#areaCards .card-play").first.click()
     pg.wait_for_timeout(1500)
-    print("B4 preview playing:", pg.evaluate("[...document.querySelectorAll('#plazaList button')].map(b=>b.textContent)"))
-    pg.click("#plazaList button:has-text('Save')")
-    pg.wait_for_timeout(1500)
-    print("B5 after save:", pg.evaluate("[...document.querySelectorAll('#plazaList button')].map(b=>b.textContent)"))
-    pg.click("#tabMap")
-    pg.fill("#codeInput", "nope-nope-0000")
-    pg.click("#codeBtn")
-    pg.wait_for_timeout(800)
-    print("B6 bad code:", pg.inner_text("#codeStatus"))
+    check("play previews in place", pg.locator("#areaCards .card.is-playing").count() == 1 and app.screen() == "city")
+    app.shot("area")
+    pg.locator("#areaCards .card-open").first.click()
+    app.wait_screen("walk")
+    check("card opens the walk's details", app.text("#walkTitleBtn") == "Canal at dusk" and app.visible("#walkHeart") and app.text("#walkCorner") == "Report")
+    check("someone else's walk shows a time of day, not a clock", any(w in app.text("#walkMeta") for w in ("Morning", "Afternoon", "Evening", "Night")), app.text("#walkMeta"))
+    pg.click("#walkHeart")
+    t = app.wait_toast()
+    check("heart saves to My map", t == "Saved to My map" and pg.get_attribute("#walkHeart", "aria-pressed") == "true", t)
+    pg.click("#walkBack")
+    pg.wait_for_timeout(500)
+    pg.click("#areaBack")
+    pg.wait_for_timeout(400)
+
+    # Codes
+    pg.click("#addCodeBtn")
+    pg.wait_for_timeout(500)
+    check("Add code opens the sheet, link turns to Cancel", app.visible("#codeSheet") and app.text("#addCodeBtn") == "Cancel")
+    pg.fill("#codeInput", "Nope Nope 0000")
+    check("typing makes codes lower-case with dashes", pg.input_value("#codeInput") == "nope-nope-0000", pg.input_value("#codeInput"))
+    pg.click("#codeAdd")
+    pg.wait_for_timeout(900)
+    check("wrong code: field marked, message shown", "is-wrong" in pg.get_attribute("#codeInput", "class") and app.text("#codeHint").startswith("No walk has this code"))
     pg.fill("#codeInput", secret_code)
-    pg.click("#codeBtn")
+    pg.click("#codeAdd")
     pg.wait_for_timeout(1500)
-    print("B7 good code:", pg.inner_text("#codeStatus"), "| saved list:", pg.inner_text("#savedList").replace("\n", " | "))
-    heard = walk("B's first walk", 6, listen=True)
-    log = pg.evaluate("document.getElementById('debugLogPre').textContent")
-    events = [l[15:] for l in log.split("\n") if "[listen] start" in l or "[listen] switch" in l]
-    print("B8 heard while walking:", events[:2] or heard[1:3])
-    pg.click("#savedList li:has-text('Secret garden') button")
-    pg.click("#nodesList button:has-text('Remove from saved')")
-    pg.wait_for_timeout(1200)
-    print("B9 saved after removing:", pg.inner_text("#savedList").replace("\n", " | "))
+    check("right code shows the walk", app.visible("#foundCard") and app.text("#foundTitle") == "Secret garden")
+    check("found card says it was shared privately", app.text("#foundMeta").startswith("Shared with you"), app.text("#foundMeta"))
+    app.shot("found")
+    pg.click("#foundSave")
+    app.wait_screen("mymap")
+    t = app.wait_toast()
+    check("Save to My map goes to Saved", t == "Saved to My map" and pg.get_attribute("#segSaved", "aria-selected") == "true", t)
+    check("Saved lists both walks", app.text("#segSaved") == "Saved 2" and "Secret garden" in app.text("#myCards"))
+    app.shot("saved")
+
+    # Hear a saved walk while walking
+    app.walk("B's first walk", 12)
+    events = [l[15:] for l in app.log().split("\n") if "[listen] start" in l or "[listen] switch" in l]
+    check("B hears A's walk while walking", any("Canal at dusk" in e for e in events), events[:2])
+
+    # Remove one, with Undo available
+    app.tab("mymap")
+    pg.click("#segSaved")
+    pg.wait_for_timeout(400)
+    card = pg.locator("#myCards .card:has(.card-title:text-is('Secret garden'))")
+    card.scroll_into_view_if_needed()
+    card.locator(".card-heart").click()
+    t = app.wait_toast()
+    check("removing offers Undo", t == "Removed from My map" and app.visible("#toastUndo"), t)
+    pg.wait_for_timeout(800)
     pg.reload()
     pg.wait_for_timeout(2500)
-    print("B10 after reload, saved:", pg.inner_text("#savedList").replace("\n", " | "))
-    pg.screenshot(path=os.path.join(OUT, "saved.png"), full_page=True)
+    app.tab("mymap")
+    pg.click("#segSaved")
+    check("after reload one saved walk is left", app.text("#segSaved") == "Saved 1", app.text("#segSaved"))
 
-    # ── Person A deletes the public walk: gone for B too ──
-    as_person("person-a")
-    pg.click("#routesList li:has-text('Canal at dusk') button")
-    pg.click("#deleteRouteBtn")
+    # ── A deletes the public walk: gone for B too ──
+    app.as_person("person-a")
+    app.open_my_walk("Canal at dusk")
+    pg.click("#walkCorner")
+    pg.wait_for_timeout(600)
+    check("delete warns how many people saved it", "1 person who saved it" in app.text("#dialogText"), app.text("#dialogText"))
+    pg.click("#dialogYes")
+    app.wait_toast()
+    app.as_person("person-b")
+    app.tab("mymap")
+    check("B's saved copy is gone", app.visible("#mymapEmpty") or app.text("#segSaved") == "Saved 0")
+    app.tab("city")
     pg.wait_for_timeout(1500)
-    as_person("person-b")
-    print("B11 saved after A deleted:", pg.inner_text("#savedList") or "(none)")
-    pg.click("#tabPlaza")
-    pg.wait_for_timeout(1500)
-    print("B12 plaza:", pg.inner_text("#plazaSummary"))
-    print("page errors:", errors)
-    b.close()
+    check("City no longer shows it", app.text("#citySummary") == "0 walks nearby" and app.visible("#cityEmpty"), app.text("#citySummary"))
+
+
+run(test)
