@@ -575,6 +575,28 @@ h1 button {
   color: #ffffff;
 }
 
+/* Glass button: the intro nav's material in a 44 pill (small button size).
+   Used for Just listen so it reads as an action, not a tagline. */
+.corner-link.glass-btn {
+  gap: 8px;
+  padding: 0 18px 0 15px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  color: #000;
+  transition: transform 150ms var(--ease-out), background-color 150ms;
+}
+.corner-link.glass-btn:active {
+  transform: scale(0.97);
+  background: rgba(255, 255, 255, 0.7);
+}
+.glass-btn-icon .icon {
+  width: 19px;
+  height: 18px;
+  display: block;
+}
 .nav-intro {
   position: absolute;
   left: calc(50% - 166.3px);
