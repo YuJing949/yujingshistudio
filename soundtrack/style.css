@@ -19,6 +19,7 @@
   --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
   --s: 1;
   --h: 844px;
+  --w: 390px;
   --kb: 0px;
   color-scheme: light only;
 }
@@ -93,7 +94,7 @@ button:disabled {
   position: fixed;
   top: 0;
   left: 50%;
-  width: 390px;
+  width: var(--w);
   height: var(--h);
   transform: translateX(-50%) scale(var(--s));
   transform-origin: top center;
@@ -110,7 +111,7 @@ button:disabled {
 
 .mid-frame {
   position: absolute;
-  left: 0;
+  left: calc((var(--w) - 390px) / 2);
   top: calc((var(--h) - 844px) / 2);
   width: 390px;
   height: 844px;
@@ -236,7 +237,7 @@ h1 button {
   position: absolute;
   left: 0;
   bottom: 0;
-  width: 390px;
+  width: 100%;
   height: 324px;
   background: linear-gradient(to bottom, rgba(213, 229, 255, 0), rgba(213, 229, 255, 0.95) 62%);
 }
@@ -549,7 +550,7 @@ h1 button {
 
 .nav {
   position: absolute;
-  left: 67px;
+  left: calc(50% - 128px);
   bottom: 12px;
   width: 250px;
   height: 75px;
@@ -576,7 +577,7 @@ h1 button {
 
 .nav-intro {
   position: absolute;
-  left: 28.7px;
+  left: calc(50% - 166.3px);
   bottom: 11px;
   width: 332.5px;
   height: 75.5px;
@@ -642,7 +643,7 @@ h1 button {
 .gpage {
   position: relative;
   flex: none;
-  width: 390px;
+  width: var(--w);
   height: 100%;
   scroll-snap-align: start;
   scroll-snap-stop: always;
@@ -702,7 +703,7 @@ h1 button {
 }
 .app-icon {
   position: absolute;
-  left: 115px;
+  left: calc(50% - 80px);
   top: 120px;
   width: 160px;
   height: 160px;
@@ -719,8 +720,8 @@ h1 button {
 .app-name {
   position: absolute;
   left: 0;
+  right: 0;
   top: 296px;
-  width: 390px;
   text-align: center;
   font-size: 16px;
   font-weight: 400;
@@ -943,7 +944,7 @@ h1 button {
 
 .pill {
   position: absolute;
-  left: 119px;
+  left: calc(50% - 76px);
   bottom: 9.5px;
   width: 152px;
   height: 69px;
@@ -1011,7 +1012,7 @@ h1 button {
 .listen-hint {
   position: absolute;
   left: 0;
-  width: 390px;
+  right: 0;
   bottom: 160px;
   text-align: center;
 }
@@ -1201,8 +1202,8 @@ button.walk-status {
 .skip-ending {
   position: absolute;
   left: 0;
+  right: 0;
   top: 80px;
-  width: 390px;
   bottom: 104px;
   display: none;
 }
@@ -1372,7 +1373,7 @@ button.walk-status {
 .city-empty {
   position: absolute;
   left: 0;
-  width: 390px;
+  right: 0;
   top: calc((var(--h) - 844px) / 2 + 486px);
   text-align: center;
 }
@@ -1388,7 +1389,7 @@ button.walk-status {
 .carousel {
   position: absolute;
   left: 0;
-  width: 390px;
+  right: 0;
   bottom: 108px;
   height: 170px;
   display: flex;
@@ -1522,7 +1523,7 @@ button.card-state {
 }
 .sheet {
   position: absolute;
-  left: 9px;
+  left: calc(50% - 186px);
   width: 372px;
   border-radius: 42px;
   background: var(--sheet);
@@ -1629,7 +1630,7 @@ button.card-state {
 }
 .mymap-empty-me {
   position: absolute;
-  left: 0;
+  left: calc((var(--w) - 390px) / 2);
   top: calc((var(--h) - 844px) / 2 - 60px);
   width: 390px;
   height: 844px;
@@ -1803,7 +1804,7 @@ button.card-state {
 }
 .dialog {
   position: absolute;
-  left: 20px;
+  left: calc(50% - 175px);
   top: calc((var(--h) - 844px) / 2 + 290px);
   width: 350px;
   padding: 30px 18px 18px;
@@ -1898,7 +1899,7 @@ button.card-state {
 }
 .toast {
   position: absolute;
-  left: 40px;
+  left: calc(50% - 155px);
   bottom: 112px;
   width: 310px;
   min-height: 56px;

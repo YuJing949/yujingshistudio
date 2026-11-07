@@ -118,17 +118,24 @@ function navHtml(tab) {
 const stage = $("stage");
 let stageScale = 1;
 let stageH = 844;
+let stageW = 390;
+// The artboard is 390 × 844, but Safari's bars leave less height than that.
+// Scale so at least 390 × MIN_H fits; extra width goes to the sides, and the
+// things that sit in the middle (orb, nav, pill, dialogs) stay centred.
+const MIN_H = 760;
 function fitStage() {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  stageScale = vw < 600 ? vw / 390 : Math.min(1, vh / 760);
+  stageScale = vw < 600 ? Math.min(vw / 390, vh / MIN_H) : Math.min(1, vh / MIN_H);
+  stageW = vw < 600 ? vw / stageScale : 390;
   stageH = Math.max(560, vh / stageScale);
   const root = document.documentElement.style;
   root.setProperty("--s", stageScale.toFixed(4));
+  root.setProperty("--w", `${stageW.toFixed(1)}px`);
   root.setProperty("--h", `${stageH.toFixed(1)}px`);
   updateKeyboard();
-  cityMap?.setAnchor(195, stageH * 0.5);
-  myMap?.setAnchor(195, stageH * 0.45);
+  cityMap?.setAnchor(stageW / 2, stageH * 0.5);
+  myMap?.setAnchor(stageW / 2, stageH * 0.45);
 }
 function updateKeyboard() {
   const vv = window.visualViewport;
@@ -281,6 +288,8 @@ function back() {
 }
 
 function switchTab(t) {
+  // Home is shown once, right after saving; coming back to Journey starts over.
+  if (t !== tab && tab === "journey" && stacks.journey.at(-1)?.id === "home") stacks.journey = [{ id: "intro" }];
   if (t === tab && stacks[t].length) {
     // Tapping the current tab goes back to its first screen.
     if (stacks[t].length > 1) {
@@ -297,7 +306,7 @@ function switchTab(t) {
 function rootOf(t) {
   if (t === "city") return "city";
   if (t === "mymap") return "mymap";
-  return homeWalk ? "home" : "intro";
+  return "intro";
 }
 
 document.addEventListener("click", (e) => {
@@ -495,7 +504,7 @@ function guidePages() {
   return [...guideTrack.querySelectorAll(".gpage")].filter((p) => !p.hidden);
 }
 function guideIndex() {
-  return Math.round(guideTrack.scrollLeft / 390);
+  return Math.round(guideTrack.scrollLeft / guideTrack.clientWidth);
 }
 function updateGuideChrome() {
   const pages = guidePages();
@@ -512,7 +521,7 @@ function updateGuideChrome() {
 }
 guideTrack.addEventListener("scroll", () => requestAnimationFrame(updateGuideChrome), { passive: true });
 $("guideNext").addEventListener("click", () => {
-  guideTrack.scrollTo({ left: (guideIndex() + 1) * 390, behavior: "smooth" });
+  guideTrack.scrollTo({ left: (guideIndex() + 1) * guideTrack.clientWidth, behavior: "smooth" });
 });
 $("guideSkip").addEventListener("click", () => closeGuide());
 $("guideBack").addEventListener("click", () => back());
@@ -822,7 +831,8 @@ screen("walk", {
 
 function walkMeta(w, mode) {
   if (mode === "other") return `${timeOfDay(w.createdAt)}<br><br>${durationText(w.durationS)}`;
-  const when = mode === "new" ? clock(w.createdAt) : `${dayLabel(w.createdAt)}, ${clock(w.createdAt)}`;
+  let when = mode === "new" ? clock(w.createdAt) : `${dayLabel(w.createdAt)}, ${clock(w.createdAt)}`;
+  if (when.length > 13) when = when.replace(", ", ",<br>"); // the panel is 148 px wide
   const dur = w.durationS != null ? durationText(w.durationS) : durationText(W.recordedSeconds());
   return `${when}<br><br>${dur}`;
 }
@@ -1405,7 +1415,7 @@ screen("city", {
         onTapRoute: (id) => scrollToCard($("areaCards"), cityArea?.walks.findIndex((w) => w.id === id) ?? -1),
         onTapEmpty: () => {},
       });
-      cityMap.setAnchor(195, stageH * 0.5);
+      cityMap.setAnchor(stageW / 2, stageH * 0.5);
     }
     if (!cityArea && !codeState) setCityChrome("browse");
     loadCity();
@@ -1554,14 +1564,14 @@ async function openArea(cell) {
   $("areaDots").style.animationDelay = "0.9s";
   cityMap.setFocus({ ids: new Set(walks.map((w) => w.id)), selected: walks[0].id });
   // Keep the light above the cards.
-  cityMap.setAnchor(195, Math.min(stageH * 0.5, stageH - 380));
+  cityMap.setAnchor(stageW / 2, Math.min(stageH * 0.5, stageH - 380));
   cityMap.centreOn(cell, 460, { animate: true });
 }
 function closeArea() {
   stopPreview();
   cityArea = null;
   cityMap.setFocus(null);
-  cityMap.setAnchor(195, stageH * 0.5);
+  cityMap.setAnchor(stageW / 2, stageH * 0.5);
   setCityChrome("browse");
   renderCitySummary(cityMe);
 }
@@ -1784,7 +1794,7 @@ function showFound() {
   cityMap.setMe(cityMe, { grey: true });
   const pts = walk.nodes.filter((n) => Number.isFinite(n.lat));
   if (pts.length) {
-    cityMap.setAnchor(195, Math.min(stageH * 0.42, stageH - 360));
+    cityMap.setAnchor(stageW / 2, Math.min(stageH * 0.42, stageH - 360));
     cityMap.fit(pts, { minAcrossM: 360, animate: true, pad: 1.4 });
   }
 }
@@ -1802,7 +1812,7 @@ async function leaveFound(keep) {
   }
   setCityRoutes();
   cityMap.setFocus(null);
-  cityMap.setAnchor(195, stageH * 0.5);
+  cityMap.setAnchor(stageW / 2, stageH * 0.5);
   cityMap.setMe(cityMe, { grey: false });
   if (cityMe) cityMap.centreOn(cityMe, 440, { animate: true });
   setCityChrome("browse");
@@ -1842,7 +1852,7 @@ screen("mymap", {
         },
         onTapCell: () => {},
       });
-      myMap.setAnchor(195, stageH * 0.45);
+      myMap.setAnchor(stageW / 2, stageH * 0.45);
     }
     renderMyMap();
   },

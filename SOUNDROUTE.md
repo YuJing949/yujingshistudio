@@ -13,6 +13,8 @@
 3. 修复测出来的问题。
 4. 把 `v2` 合并到 `main`，部署正式站（§8）。
 
+**2026-11-07 第一次手机测试后的修改：** 保存后只显示一次 Home，离开 Journey 再回来回到 “Start your journey”；界面按宽度和可用高度一起缩放（Safari 工具栏会占高度），导航等元素随之变小并保持居中。
+
 **Blue 版还没做的：** 地点名（反向地理编码）没接，详情页只显示时间和时长；City 里“Show in City”按钮没做；深色模式不跟随（规格里定为只做浅色）。
 
 ## 1. 项目是什么
@@ -196,6 +198,7 @@ python3 tests/soundroute/polish.py         # 引导、加到主屏幕、隐去�
 | `maxAccuracyM`、`stepVarianceM2`、`timeVarianceM2PerS` | `location.js` | 50 / 0.15 / 1.0 | GPS 融合：忽略多差的 GPS、步数和时间带来的不确定性 |
 | `MAX_WALK_SECONDS`、`POINT_INTERVAL_MS`、`AUDIO_BITS_PER_SECOND` | `walker.js` | 300 秒 / 2 秒 / 32 kbps | 录音时长、轨迹点间隔、码率 |
 | `PRIVATE_START_M` | `cloud.js` | 30 米 | 上传时隐去的起点距离 |
+| `MIN_H` | `app.js` | 760 | 界面按 390 宽的画板缩放，同时保证至少 760 高放得下（Safari 的工具栏会占掉高度）；多出的宽度留给左右，居中的元素仍居中 |
 | `PREVIEW_SECONDS`、`SHORT_WALK_SECONDS`、`GPS_PATIENCE_MS` | `app.js` | 20 秒 / 10 秒 / 20 秒 | 试听时长、多短算太短、多久后出现 Start anyway |
 | 网格大小 | `soundroute.sql` 的 `get_plaza_cells()`、`cloud.js` 与 `app.js` 的 `PLAZA_CELL` | 0.0018° × 0.0029°（约 200 米） | 三处必须一致 |
 | 举报隐藏阈值、每日上限 | `soundroute.sql` | 3 次；30 段旅程 / 20 次举报 | — |
