@@ -1033,8 +1033,8 @@ function startRename() {
 }
 function autosize() {
   const input = $("renameInput");
-  input.style.height = "59px";
-  input.style.height = `${Math.min(177, input.scrollHeight)}px`;
+  input.style.height = "39px";
+  input.style.height = `${Math.min(195, input.scrollHeight)}px`;
   $("walkCorner").disabled = !input.value.trim();
 }
 $("renameInput").addEventListener("input", () => {
