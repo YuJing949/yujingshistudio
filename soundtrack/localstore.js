@@ -56,3 +56,8 @@ export function listPendingWalks() {
 export function deletePendingWalk(id) {
   return withStore("readwrite", (s) => asPromise(s.delete(id)));
 }
+
+/** Removes every walk kept in this browser (used by Start over). */
+export function clearPendingWalks() {
+  return withStore("readwrite", (s) => asPromise(s.clear()));
+}

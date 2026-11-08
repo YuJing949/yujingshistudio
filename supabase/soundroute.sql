@@ -394,3 +394,49 @@ $$;
 
 revoke all on function public.save_count(uuid) from public, anon;
 grant execute on function public.save_count(uuid) to authenticated;
+
+-- ─────────────────────────────────────────────
+-- Start over (2026-11-08): the account page can delete everything a visitor
+-- has and send them back to the guide. The app first removes the visitor's
+-- audio files (storage API), then calls start_over(), which deletes the
+-- visitor's auth user. Their walks, points, saves and reports go with it
+-- (every table references auth.users with on delete cascade), and a linked
+-- email is freed. start_over_counts() fills in the confirm dialog.
+-- ─────────────────────────────────────────────
+
+create or replace function public.start_over_counts()
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select json_build_object(
+    'walks',  (select count(*) from public.routes where owner = auth.uid()),
+    'saved',  (select count(*) from public.saves where user_id = auth.uid()),
+    'savers', (select count(distinct s.user_id)
+               from public.saves s
+               join public.routes r on r.id = s.route_id
+               where r.owner = auth.uid() and s.user_id <> auth.uid())
+  );
+$$;
+
+revoke all on function public.start_over_counts() from public, anon;
+grant execute on function public.start_over_counts() to authenticated;
+
+create or replace function public.start_over()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not signed in';
+  end if;
+  delete from auth.users where id = auth.uid();
+end;
+$$;
+
+revoke all on function public.start_over() from public, anon;
+grant execute on function public.start_over() to authenticated;

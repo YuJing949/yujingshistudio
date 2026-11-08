@@ -15,4 +15,4 @@ Working rules for SoundRoute:
 - Database changes go in `supabase/soundroute.sql` and must stay safe to re-run. The user pastes it into the Supabase SQL Editor.
 - When changing Supabase calls in `cloud.js` / `supabase.js`, update `tests/soundroute/fake-supabase.js` to match.
 - The user writes in Chinese: reply in Chinese. The app's UI text stays in English.
-- Before handing over, run `node --check` on changed files and the tests in `SOUNDROUTE.md` §9 (`decide.test.mjs`, `run.py`, `share.py`, `polish.py`). Then update `SOUNDROUTE.md` §0 and §7 with what changed.
+- Before handing over, run `node --check` on changed files and the tests in `SOUNDROUTE.md` §9 (`decide.test.mjs`, `run.py`, `share.py`, `polish.py`, `startover.py`). Then update `SOUNDROUTE.md` §0 and §7 with what changed.

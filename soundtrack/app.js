@@ -6,7 +6,7 @@
 import * as W from "./walker.js";
 import { layoutWalk, renderOrbRoute } from "./orb.js";
 import { CityMap } from "./citymap.js";
-import { savePendingWalk, listPendingWalks, deletePendingWalk } from "./localstore.js";
+import { savePendingWalk, listPendingWalks, deletePendingWalk, clearPendingWalks } from "./localstore.js";
 
 const PREVIEW_SECONDS = 20;
 const SHORT_WALK_SECONDS = 10;
@@ -381,10 +381,12 @@ function closeLayer(el) {
   }, 300);
 }
 /** A confirm dialog in the Blue style. Resolves true for the right-hand (black) button. */
-function confirmDialog({ title, text, no = "Keep", yes }) {
+function confirmDialog({ title, text, note = "", no = "Keep", yes }) {
   dialogResolve?.(false);
   $("dialogTitle").textContent = title;
   $("dialogText").textContent = text;
+  $("dialogNote").textContent = note;
+  $("dialogNote").hidden = !note;
   $("dialogNo").textContent = no;
   $("dialogYes").textContent = yes;
   const d = $("dialog");
@@ -1989,6 +1991,11 @@ async function renderAccount(state = null) {
   $("homeScreenRow").hidden = isStandalone();
   $("accWarn").hidden = !(s === "anon" && accountMode === "signin" && routes.length > 0);
   if (s === "linked") $("linkedTitle").textContent = `Linked to ${email}`;
+  $("accReset").hidden = s === "sent";
+  $("startOverNote").textContent =
+    s === "linked"
+      ? "Delete your walks, unlink this email and begin again from the guide."
+      : "Delete your walks and begin again from the guide.";
   if (s === "anon") {
     const signin = accountMode === "signin";
     $("accAnonTitle").textContent = signin ? "Sign in on this phone" : "Anonymous on this phone";
@@ -2127,6 +2134,70 @@ $("signOutBtn").addEventListener("click", async () => {
     return;
   }
   location.reload();
+});
+
+// ── Start over: delete everything, back to the guide ──
+
+/** The Start over dialog's text, from { walks, saved, savers }. */
+function startOverText({ walks, saved, savers }, email) {
+  const what = [];
+  if (walks) what.push(`deletes your ${plural(walks, "walk")}`);
+  if (saved) what.push(`clears the ${plural(saved, "walk")} you saved`);
+  let text = what.length ? `This ${what.join(" and ")}.` : "You have no walks yet.";
+  if (savers) text += ` ${plural(savers, "person", "people")} who saved your walks will lose them too.`;
+  if (email) text += ` ${email} will be unlinked.`;
+  return text;
+}
+
+screen("startover", {});
+
+$("startOverRow").addEventListener("click", async () => {
+  if (W.state.recording) return;
+  let counts = { walks: routes.length, saved: savedWalks.length, savers: 0 };
+  let email = null;
+  try {
+    counts = await (await cloud()).startOverCounts();
+  } catch (e) {
+    log("[start over] counts failed", e?.message || e);
+  }
+  try {
+    email = await (await sb()).linkedEmail();
+  } catch {
+    email = null;
+  }
+  const yes = await confirmDialog({
+    title: "Start over?",
+    text: startOverText(counts, email),
+    note: "You’ll see the guide again, like the first time. This can’t be undone.",
+    yes: "Start over",
+  });
+  if (!yes) return;
+  hideToast();
+  go("startover", {}, "fade");
+  const started = Date.now();
+  try {
+    await (await cloud()).startOver();
+  } catch (e) {
+    log("[start over] failed", e?.message || e);
+    back();
+    toast(e?.partial ? "Couldn’t finish starting over. Try again." : "Couldn’t start over. Nothing was deleted.");
+    return;
+  }
+  log("[start over] cloud cleared");
+  if (W.player.playingWalkId) W.player.stop();
+  if (W.state.listening) W.setListening(false);
+  await clearPendingWalks().catch(() => {});
+  await (await sb()).forgetSession();
+  try {
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith("soundroute"))
+      .forEach((k) => localStorage.removeItem(k));
+  } catch {
+    // private mode
+  }
+  // Let the orb finish letting go, then open the app as if for the first time.
+  await new Promise((r) => setTimeout(r, Math.max(0, 2400 - (Date.now() - started))));
+  location.replace(location.pathname);
 });
 
 // ─────────────────────────────────────────────

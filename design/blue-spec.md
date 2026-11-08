@@ -433,6 +433,13 @@ My map（第 3 项）
 - **布局**：卡片里：黑色圆形对勾和 `Linked to you@example.com`，说明，描边按钮 `Sign out`；toast `Email linked`。
 - **交互**：`Sign out` 先确认（补充：用对话框，样式同 Discard），说明 `Your walks stay with this email. Sign in again to hear them.`，然后回到匿名状态。
 
+#### Start over：从头开始（2026-11-08 新增；BlueStartOver、BlueStartingOver）
+
+- **入口**：`BlueAccount` 列表最后一行 `Start over >`，下面 13px 灰字 `Delete your walks and begin again from the guide.`；`BlueAccountLinked` 卡片下方单独一行，灰字改成 `Delete your walks, unlink this email and begin again from the guide.`。查收邮件状态下不显示。
+- **确认对话框**（样式同 Delete）：标题 `Start over?`；正文按实际数量拼：`This deletes your 3 walks and clears the 4 walks you saved. 2 people who saved your walks will lose them too.`，为 0 的部分省略，都没有时写 `You have no walks yet.`；已绑定邮箱时再加 `you@example.com will be unlinked.`；正文下 13px 灰字 `You’ll see the guide again, like the first time. This can’t be undone.`；按钮 `Keep` / 黑色 `Start over`。
+- **清除中**：`BlueStartingOver`，版式同 `BlueGPS`：光球 2.4 秒内缩小淡出，三个白点向外散开（`sr-let-go`、`sr-dot-a/b/c`）；标题 `Starting over…`，说明 `Clearing your walks from this phone and from the cloud.`。至少停留 2.4 秒，然后重新打开应用，进 `BlueGuide1`。
+- **实现**：先删云端的录音文件，再调用 `start_over()` 删除这个用户（旅程、点、收藏、举报随之删除，邮箱解除绑定）；然后清空手机上的待上传旅程和 `soundroute*` 本地记录、退出登录、重新载入，得到一个新的匿名身份。删录音失败时回到账号页，toast `Couldn’t start over. Nothing was deleted.`；录音已删但删用户失败时 toast `Couldn’t finish starting over. Try again.`。
+
 ### 2.4 首次打开
 
 所有引导页的共同点：右上角 `Skip` 直接进 `BlueIntro`；左下角是页码点（选中的一个是 18×6 的黑色短线）；右下是黑色 `Next`（69 高）。引导只出现一次，看过后记到 localStorage。

@@ -292,3 +292,26 @@ export async function deleteWalk(walk) {
   const { error } = await supabase.from("routes").delete().eq("id", walk.id);
   if (error) throw error;
 }
+
+/** Numbers for the Start over dialog: { walks, saved, savers }. */
+export async function startOverCounts() {
+  const { data, error } = await supabase.rpc("start_over_counts");
+  if (error) throw error;
+  return { walks: data?.walks || 0, saved: data?.saved || 0, savers: data?.savers || 0 };
+}
+
+/**
+ * Deletes everything this visitor has in the cloud: first their audio files,
+ * then (start_over) their user, which takes their walks, points, saves and
+ * reports with it. If the files can't be removed, nothing else is deleted.
+ */
+export async function startOver() {
+  const mine = await loadMyWalks();
+  const paths = mine.map((w) => w.audioPath).filter(Boolean);
+  for (let i = 0; i < paths.length; i += 100) {
+    const { error } = await supabase.storage.from(AUDIO_BUCKET).remove(paths.slice(i, i + 100));
+    if (error) throw error;
+  }
+  const { error } = await supabase.rpc("start_over");
+  if (error) throw Object.assign(new Error(error.message), { partial: paths.length > 0 });
+}

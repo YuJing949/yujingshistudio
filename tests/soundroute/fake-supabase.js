@@ -211,6 +211,27 @@ export function createClient() {
         if (!r || r.owner !== uid()) return { data: 0, error: null };
         return { data: db.saves.filter((s) => s.route_id === r.id && s.user_id !== uid()).length, error: null };
       }
+      if (fn === "start_over_counts") {
+        const mine = db.routes.filter((r) => r.owner === uid()).map((r) => r.id);
+        const savers = new Set(db.saves.filter((x) => mine.includes(x.route_id) && x.user_id !== uid()).map((x) => x.user_id));
+        return {
+          data: { walks: mine.length, saved: db.saves.filter((x) => x.user_id === uid()).length, savers: savers.size },
+          error: null,
+        };
+      }
+      if (fn === "start_over") {
+        if (localStorage.getItem("fake-fail-start-over")) return { data: null, error: { message: "Network request failed" } };
+        // deleting the user cascades to routes, points, saves and reports
+        const me = uid();
+        const gone = new Set(db.routes.filter((r) => r.owner === me).map((r) => r.id));
+        db.routes = db.routes.filter((r) => !gone.has(r.id));
+        db.points = db.points.filter((x) => !gone.has(x.route_id));
+        db.saves = db.saves.filter((x) => x.user_id !== me && !gone.has(x.route_id));
+        db.reports = db.reports.filter((x) => x.reporter !== me && !gone.has(x.route_id));
+        localStorage.removeItem("fake-email-" + me);
+        save(db);
+        return { data: null, error: null };
+      }
       return { data: null, error: { message: `unknown function ${fn}` } };
     },
     storage: {
@@ -224,6 +245,7 @@ export function createClient() {
           return { error: null };
         },
         remove: async (paths) => {
+          if (localStorage.getItem("fake-fail-remove")) return { error: { message: "Network request failed" } };
           const db = load();
           paths.filter((p) => p.startsWith(`${uid()}/`)).forEach((p) => delete db.files[p]);
           save(db);

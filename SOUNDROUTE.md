@@ -15,6 +15,8 @@
 
 **2026-11-07 第一次手机测试后的修改：** 保存后只显示一次 Home，离开 Journey 再回来回到 “Start your journey”；界面按宽度和可用高度一起缩放（Safari 工具栏会占高度），导航等元素随之变小并保持居中。Start 页右上角的 `Just listen` 改成按钮：44 高的半透明白色胶囊（和 Start 页导航同一种材质），左边加耳机图标，按下缩到 0.97。旅程详情面板：旅程名改成 31px、最多 3 行；修好了宽屏 iPhone 上时间、分享码、Public 开关跑出面板的问题（它们之前跟着光球往右移了）。
 
+**2026-11-08 新增 Start over：** 账号页最后一行 `Start over`，确认后删除这个人的全部旅程、录音、收藏和账号（绑定的邮箱也解除），清空手机上的记录，重新从引导开始。需要在 Supabase **重新运行 `supabase/soundroute.sql`**（新增 `start_over_counts()` 和 `start_over()`）；没运行时点 Start over 会提示失败、不删任何东西。规格见 `design/blue-spec.md` §2.3 Start over。
+
 **Blue 版还没做的：** 地点名（反向地理编码）没接，详情页只显示时间和时长；City 里“Show in City”按钮没做；深色模式不跟随（规格里定为只做浅色）。
 
 ## 1. 项目是什么
@@ -145,6 +147,7 @@
 - [x] **阶段 1–4**（旧界面下通过）：匿名登录、GPS 定位、记录、上传、刷新后保留、删除、沿原路收听、转身音量变化、离开后淡出。**Blue 界面下要重新测一遍。**
 - [ ] **Blue：外观**：各页面在 iPhone 上的位置是否和画布一致（小屏 iPhone SE、大屏 Pro Max 各看一次）；底部导航和 Home 指示条不打架；输入分享码、邮箱时弹窗跟着键盘上移。
 - [ ] **Blue：Journey**：第一次点 ↑ 进 Before you walk，三次授权依次弹出；GPS 页找到定位后自动开始；话筒圈随时间变长、点话筒能暂停；■ 后看到路线被画出来（点屏幕可跳过）；改名、Save、回到 Home；Discard 会先确认。
+- [ ] **Blue：Start over**：先重新运行 SQL。账号页最下面有 `Start over`；对话框里的数量对；确认后看到 Starting over…，然后回到第一页引导；My map 是空的；另一台手机上收藏过的这段旅程也不见了；绑定过邮箱的话，用同一个邮箱可以重新绑定。
 - [ ] **Blue：旅程详情**：长名字（30 个字以上）在面板里最多 3 行，时间、Public 开关、分享码、Copy 都在面板内；改名时 40 个字都能看到。
 - [ ] **Blue：收听**：Start 页的 Just listen 看起来像按钮（白色半透明胶囊、耳机图标），不像标语；Just listen 走近收藏的旅程，标题换成它的名字；My map 卡片的播放能坐着听。
 - [ ] **Blue：分享**：把一段旅程设为公开，复制另一段私密旅程的分享码。用无痕窗口当作第二个人：City 里看到光区，点开、卡片试听、进详情收藏；Add code 输错有抖动和提示，输对后 Save to My map；沿路线走能听到收藏的旅程。回到自己这边删除公开的旅程，提示里写有人收藏，无痕窗口刷新后它消失。
@@ -179,9 +182,10 @@ node tests/soundroute/decide.test.mjs      # 收听决策单元测试
 python3 tests/soundroute/run.py            # 太短提示 → 录音 → Ending → 改名保存 → 刷新 → 收听 → 离线重传 → 删除
 python3 tests/soundroute/share.py          # 两个人：公开、City 光区、试听、收藏、分享码、Undo、作者删除
 python3 tests/soundroute/polish.py         # 引导、加到主屏幕、隐去起点、三人举报隐藏、邮箱绑定
+python3 tests/soundroute/startover.py      # Start over：对话框里的数量、Keep、删除失败不删东西、清空后回到引导、新身份
 ```
 
-三个浏览器测试共用 `tests/soundroute/blue.py`（走一段、换人、点光区等操作）。每项检查打印 `ok` 或 `FAIL`，有失败时退出码非 0，并在 `out/failure.png` 留下截图和日志末尾。
+浏览器测试共用 `tests/soundroute/blue.py`（走一段、换人、点光区等操作）。每项检查打印 `ok` 或 `FAIL`，有失败时退出码非 0，并在 `out/failure.png` 留下截图和日志末尾。
 
 较新的 Chromium（156 起）也实现了 `DeviceMotionEvent.requestPermission()`，无头模式下默认返回 denied，所以三个浏览器测试在 `new_context` 里额外授予了 `accelerometer`、`gyroscope`、`magnetometer` 权限。
 

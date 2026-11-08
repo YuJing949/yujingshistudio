@@ -102,3 +102,12 @@ export async function signOut() {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }
+
+/** Forgets the session on this phone only (the user may already be deleted). */
+export async function forgetSession() {
+  try {
+    await supabase.auth.signOut({ scope: "local" });
+  } catch {
+    // already gone
+  }
+}

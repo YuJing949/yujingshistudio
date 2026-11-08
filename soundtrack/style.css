@@ -1826,6 +1826,63 @@ button.card-state {
 .acc-warn {
   margin: 12px 10px 0;
 }
+/* Start over: a quiet last row, under the others (or under the linked card). */
+.acc-reset {
+  margin-top: 24px;
+  font-size: 16px;
+  font-weight: 400;
+}
+.acc-rows:not([hidden]) + .acc-warn[hidden] + .acc-reset,
+.acc-rows:not([hidden]) + .acc-warn + .acc-reset {
+  margin-top: 0;
+}
+.acc-rows:not([hidden]) + .acc-warn[hidden] + .acc-reset .acc-row {
+  border-top: 0;
+}
+.acc-reset .acc-row {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+.acc-reset-note {
+  margin: 8px 10px 0;
+}
+.dialog .t-sub:has(+ .dialog-note:not([hidden])) {
+  margin-bottom: 0;
+}
+.dialog .dialog-note {
+  margin: 10px 2px 28px;
+}
+
+/* Starting over: the orb lets go, its dots drift away. */
+.let-go {
+  position: absolute;
+  left: 95px;
+  top: 180px;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle closest-side, #0030ff 0%, #3c78ff 45%, #72aaff 72%, rgba(228, 244, 255, 0) 100%);
+}
+.let-go-dot {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+.let-go-dot.is-pass {
+  background: rgba(255, 255, 255, 0.6);
+}
+@keyframes sr-let-go { 0%, 12% { transform: scale(1); opacity: 1; } 78%, 100% { transform: scale(0.18); opacity: 0; } }
+@keyframes sr-dot-a { 0%, 10% { transform: none; opacity: 1; } 70%, 100% { transform: translate(-46px, -58px); opacity: 0; } }
+@keyframes sr-dot-b { 0%, 16% { transform: none; opacity: 1; } 76%, 100% { transform: translate(52px, 40px); opacity: 0; } }
+@keyframes sr-dot-c { 0%, 22% { transform: none; opacity: 1; } 82%, 100% { transform: translate(-30px, 64px); opacity: 0; } }
+.sr-let-go { animation: sr-let-go 2.4s cubic-bezier(0.4, 0, 0.2, 1) both; }
+.sr-dot-a { animation: sr-dot-a 2.4s ease-in both; }
+.sr-dot-b { animation: sr-dot-b 2.4s ease-in both; }
+.sr-dot-c { animation: sr-dot-c 2.4s ease-in both; }
+@media (prefers-reduced-motion: reduce) {
+  .sr-let-go, .sr-dot-a, .sr-dot-b, .sr-dot-c { animation: none; }
+}
 
 /* ── Dialog, report sheet, toast ─────────────────────────────── */
 

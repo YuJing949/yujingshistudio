@@ -325,8 +325,27 @@
             <button type="button" class="acc-row" id="homeScreenRow">Add to Home Screen<span data-icon="chevron"></span></button>
           </div>
           <p class="t-small grey acc-warn" id="accWarn" hidden>Walks recorded anonymously on this phone won’t move to that account.</p>
+          <div class="acc-reset" id="accReset">
+            <button type="button" class="acc-row" id="startOverRow">Start over<span data-icon="chevron"></span></button>
+            <p class="t-small grey acc-reset-note" id="startOverNote">Delete your walks and begin again from the guide.</p>
+          </div>
         </div>
         <button type="button" class="back" data-back aria-label="Back to My map"><span data-icon="back"></span></button>
+      </section>
+
+      <!-- ───────────── Start over: clearing ───────────── -->
+      <section id="s-startover" class="screen" data-tab="mymap" aria-label="Starting over" hidden>
+        <div class="bg" data-bg="drift"></div>
+        <div class="mid-frame" aria-hidden="true">
+          <div class="let-go sr-let-go"></div>
+          <span class="let-go-dot sr-dot-a" style="left: 160px; top: 236px"></span>
+          <span class="let-go-dot sr-dot-b" style="left: 214px; top: 290px"></span>
+          <span class="let-go-dot is-pass sr-dot-c" style="left: 176px; top: 322px"></span>
+        </div>
+        <div class="gps-text" role="status">
+          <h1 class="t-display">Starting<br />over…</h1>
+          <p class="t-sub">Clearing your walks from this phone and from the cloud.</p>
+        </div>
       </section>
 
       <!-- ───────────── Shared layers ───────────── -->
@@ -334,6 +353,7 @@
       <div class="dialog" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" hidden>
         <h2 class="t-title" id="dialogTitle"></h2>
         <p class="t-sub" id="dialogText"></p>
+        <p class="t-small grey dialog-note" id="dialogNote" hidden></p>
         <div class="dialog-actions">
           <button type="button" class="btn btn-56 btn-outline" id="dialogNo"></button>
           <button type="button" class="btn btn-56" id="dialogYes"></button>
