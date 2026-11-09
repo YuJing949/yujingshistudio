@@ -21,7 +21,7 @@ const translations = {
     "intro.greeting.line1": "Hi, I'm",
     "intro.greeting.line2": "Yujing Shi",
     "intro.description":
-      "I'm a product and experience designer exploring embodied and inclusive interaction. Based in London, working at the intersection of object-making, computing, and spatial curation. Currently studying Product & Furniture Design at UAL, with a Creative Computing diploma from CCI.",
+      "I’m a product and experience designer exploring embodied and playful interaction, working at the intersection of product design, computing and spatial experience. I’m currently studying Innovation Design Engineering, a joint programme between the Royal College of Art and Imperial College London, and hold a BA in Product and Furniture Design from UAL.",
 
     // Projects
     "projects.title": "PROJECTS",
@@ -40,7 +40,15 @@ const translations = {
     "project.4.title": "Orbital Time",
     "project.4.subtitle": "A Timer That Empowers Users to Redefine Time in Their Own Ways.",
     "project.4.description":
-      "The Orbital Hour invites users to define their own rhythms by turning objects and memories into personal measures of time. Through a system of time specimen boxes and a rotating timer device, time becomes not just something to count, but something to feel and treasure, reconnecting time with lived experience.",
+      "The Orbital Hour invites users to measure time in personal memories instead of minutes. Through a system of time specimen boxes and a rotating timer device, time becomes not just something to count, but something to feel and treasure, reconnecting time with lived experience.",
+    "project.4.extra":
+      "Each memory (such as a leaf) is sealed into an NFC-tagged “record” and linked to a duration. Place it on the player and lower the tone arm, and an LED travels one full orbit. When idle, the device works as a blurred clock.",
+    "project.3.extra":
+      "Stockwell’s new art centre needed space for wet paper and fabric artwork, usable by residents of all ages and abilities. This project ran co-design workshops linking the client, the architect and local residents to gather ongoing feedback.",
+    "project.1.keywords": "Sustainable design, community living",
+    "project.2.keywords": "Lighting design, product design",
+    "project.3.keywords": "Participatory design, community service",
+    "project.4.keywords": "Interaction design, product design",
 
     // Contact
     "contact.title": "CONTACT",
@@ -59,7 +67,7 @@ const translations = {
     "intro.greeting.line1": "你好",
     "intro.greeting.line2": "我是石宇静",
     "intro.description":
-      "我致力于探索具身化与包容性的交互设计。目前常驻伦敦,工作领域涵盖物件制造、计算科学及空间策划的交叉地带。现就读于伦敦艺术大学产品与家具设计专业，同时持有创意计算学院的创意计算文凭。",
+      "我是一名产品与体验设计师，致力于探索具身化与趣味性的交互设计，工作领域涵盖产品设计、计算科学与空间体验的交叉地带。现就读于英国皇家艺术学院与帝国理工学院联合开设的创新设计工程专业，并持有伦敦艺术大学产品与家具设计学士学位。",
 
     // Projects
     "projects.title": "过往项目",
@@ -78,7 +86,15 @@ const translations = {
     "project.4.title": "轨道时间",
     "project.4.subtitle": "一款赋予用户权利、以个人方式重新定义时间的计时器。",
     "project.4.description":
-      "轨道时间邀请用户通过将物件与记忆转化为个人度量时间的方式，来定义属于自己的时间节奏。通过一套时间标本盒系统和一个旋转计时装置，时间不再仅仅是冰冷的数字计算，而变成了可以被感知、被珍藏的体验，从而将时间与真实的生活经历重新连接。",
+      "轨道时间邀请用户以个人记忆而非分钟来度量时间。通过一套时间标本盒系统和一个旋转计时装置，时间不再只是被计算的数字，而成为可以被感知、被珍藏的体验，从而将时间与真实的生活经历重新连接。",
+    "project.4.extra":
+      "每一段记忆（比如一片树叶）都被封存进一张带 NFC 标签的“唱片”，并与一段时长相连。把它放上播放器、放下唱臂，一颗 LED 便沿轨道走完一整圈。闲置时，这个装置是一只模糊的时钟。",
+    "project.3.extra":
+      "Stockwell 新艺术中心需要一个晾放湿纸与织物作品的空间，并让不同年龄、不同能力的居民都能使用。本项目组织了共同设计工作坊，连接委托方、建筑师与当地居民，持续收集反馈。",
+    "project.1.keywords": "可持续设计，社区生活",
+    "project.2.keywords": "灯光设计，产品设计",
+    "project.3.keywords": "参与式设计，社区服务",
+    "project.4.keywords": "交互设计，产品设计",
 
     // Contact
     "contact.title": "联系方式",

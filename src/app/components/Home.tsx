@@ -21,6 +21,47 @@ const projectThumbnails: Record<number, { thumbnail: string; video?: string }> =
   },
 };
 
+// 能悬停的设备（电脑鼠标）：悬停时播放。
+// 手机、平板等没有悬停的设备：视频大半进入屏幕时自动静音播放，滑出屏幕就暂停。
+// 系统开启了“减弱动态效果”时不自动播放。
+function CoverVideo({ src }: { src: string }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [canHover] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches,
+  );
+
+  useEffect(() => {
+    if (canHover) return;
+    const video = wrapRef.current?.querySelector("video");
+    if (!video) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) video.play().catch(() => {});
+        else video.pause();
+      },
+      { threshold: 0.5 },
+    );
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, [canHover]);
+
+  return (
+    <div ref={wrapRef} className="w-full h-full">
+      <VideoWithLoading
+        src={src}
+        loop
+        muted
+        playsInline
+        preload={canHover ? "auto" : "metadata"}
+        onMouseEnter={canHover ? (e) => e.currentTarget.play() : undefined}
+        onMouseLeave={canHover ? (e) => e.currentTarget.pause() : undefined}
+        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+      />
+    </div>
+  );
+}
+
 export function Home() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -35,7 +76,7 @@ export function Home() {
   const [isLeftColumnHovered, setIsLeftColumnHovered] = useState(false);
   const [isRightColumnHovered, setIsRightColumnHovered] = useState(false);
 
-  const projects = [1, 2, 3, 4].map((id) => ({
+  const projects = [1, 3, 4, 2].map((id) => ({
     id,
     title: t(`project.${id}.title`),
     subtitle: t(`project.${id}.subtitle`),
@@ -144,12 +185,12 @@ export function Home() {
       <div className="flex flex-col lg:flex-row lg:h-screen">
         <div
           ref={leftColumnRef}
-          className="w-full lg:w-1/2 flex items-start px-3 pt-20 pb-8 lg:pb-0 lg:fixed lg:h-screen"
+          className="w-full lg:w-1/2 flex items-start px-3 pt-24 pb-8 lg:pt-20 lg:pb-0 lg:fixed lg:h-screen"
           onMouseMove={handleRightColumnMouseMove}
           onMouseEnter={handleLeftColumnMouseEnter}
           onMouseLeave={handleLeftColumnMouseLeave}
         >
-          <h1 className="font-bold leading-none tracking-tight text-[clamp(2.5rem,10vw,12.5rem)] [word-break:keep-all]">
+          <h1 className="font-bold leading-none tracking-tight text-[52px] lg:text-[clamp(2.5rem,10vw,12.5rem)] [word-break:keep-all]">
             {t("intro.greeting.line1")},<br />
             <span className="whitespace-nowrap">{t("intro.greeting.line2")},</span>
           </h1>
@@ -169,7 +210,7 @@ export function Home() {
 
           <div ref={projectsRef} data-section="projects" className="min-h-screen py-8 px-3">
             <h2 className="tracking-tight mb-8 text-[28px] lg:text-[36px] italic font-bold">{t("projects.title")}</h2>
-            <div className="space-y-6">
+            <div className="space-y-8 lg:space-y-6">
               {projects.map((project) => (
                 <button
                   key={project.id}
@@ -182,15 +223,7 @@ export function Home() {
                 >
                   <div className="aspect-[4/3] overflow-hidden relative">
                     {project.thumbnail.endsWith(".mp4") ? (
-                      <VideoWithLoading
-                        src={project.thumbnail}
-                        loop
-                        muted
-                        playsInline
-                        onMouseEnter={(e) => e.currentTarget.play()}
-                        onMouseLeave={(e) => e.currentTarget.pause()}
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
+                      <CoverVideo src={project.thumbnail} />
                     ) : (
                       <ImageWithLoading
                         src={project.thumbnail}
@@ -199,7 +232,7 @@ export function Home() {
                       />
                     )}
                   </div>
-                  <p className="mt-2 text-sm tracking-wider text-left">{project.subtitle}</p>
+                  <p className="mt-2 text-sm leading-snug tracking-wider text-left">{project.subtitle}</p>
                 </button>
               ))}
             </div>
@@ -211,7 +244,7 @@ export function Home() {
                 <h2 className="text-[28px] lg:text-[36px] tracking-tight mb-8 font-bold">{t("contact.title")}</h2>
                 <div className="space-y-4">
                   <div>
-                    <p className="text-lg lg:text-xl text-gray-500 mb-2">{t("contact.instagram")}</p>
+                    <p className="text-base lg:text-xl text-gray-500 mb-1 lg:mb-2">{t("contact.instagram")}</p>
                     <a
                       href="https://instagram.com/yujing.context"
                       target="_blank"
@@ -222,7 +255,7 @@ export function Home() {
                     </a>
                   </div>
                   <div>
-                    <p className="text-lg lg:text-xl text-gray-500 mb-2">{t("contact.behance")}</p>
+                    <p className="text-base lg:text-xl text-gray-500 mb-1 lg:mb-2">{t("contact.behance")}</p>
                     <a
                       href="https://behance.net/yujingshi4"
                       target="_blank"
@@ -233,7 +266,7 @@ export function Home() {
                     </a>
                   </div>
                   <div>
-                    <p className="text-lg lg:text-xl text-gray-500 mb-2">{t("contact.linkedin")}</p>
+                    <p className="text-base lg:text-xl text-gray-500 mb-1 lg:mb-2">{t("contact.linkedin")}</p>
                     <a
                       href="https://linkedin.com/in/yujingshi6"
                       target="_blank"
@@ -244,7 +277,7 @@ export function Home() {
                     </a>
                   </div>
                   <div>
-                    <p className="text-lg lg:text-xl text-gray-500 mb-2">{t("contact.email")}</p>
+                    <p className="text-base lg:text-xl text-gray-500 mb-1 lg:mb-2">{t("contact.email")}</p>
                     <a
                       href="mailto:shi.yujing@outlook.com"
                       className="block text-lg lg:text-xl hover:opacity-60 transition-opacity"
