@@ -76,7 +76,7 @@ export function Home() {
   const [isLeftColumnHovered, setIsLeftColumnHovered] = useState(false);
   const [isRightColumnHovered, setIsRightColumnHovered] = useState(false);
 
-  const projects = [1, 3, 4, 2].map((id) => ({
+  const projects = [4, 3, 1, 2].map((id) => ({
     id,
     title: t(`project.${id}.title`),
     subtitle: t(`project.${id}.subtitle`),

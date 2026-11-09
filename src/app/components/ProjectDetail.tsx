@@ -7,7 +7,7 @@ import { useLanguage } from "../contexts/LanguageContext";
 const MEDIA = "https://media.yujingshistudio.com";
 
 // 项目在页面上的顺序（和首页一致）
-const PROJECT_ORDER = ["1", "3", "4", "2"];
+const PROJECT_ORDER = ["4", "3", "1", "2"];
 
 // 排版：电脑上是两栏（标题在左、介绍在右；图片两栏，大小不必一样），手机上变成一栏，
 // 只有纯图片的网格在手机上仍保持两栏。
@@ -65,7 +65,7 @@ function GrowTogether() {
           className="w-full aspect-[4/3] object-cover block" place="lg:col-start-1 lg:row-start-2"
         />
         <p className={`${bodyText} lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-center lg:max-w-[34em]`}>
-          {t("project.1.description")}
+          {t("project.1.extra")}
         </p>
       </div>
       <Img src={`${MEDIA}/plant_render.png`} alt={`${title} - 4`} className="w-full aspect-[4/3] object-cover block" />

@@ -28,7 +28,9 @@ const translations = {
     "project.1.title": "Grow-Together",
     "project.1.subtitle": "A Modular Herb Pot Reducing Waste and Encouraging Community Sharing.",
     "project.1.description":
-      "Excess food waste is a big challenge for everyone who lives alone. At the same time, for students living in an international student accommodation, trying to connect with flatmates from diverse cultures is essential and challenging. This project explores growing herbs can foster a more sustainable and socially connected community. The final design is a modular self-sustaining herb pot, encouraging students to reduce waste and strengthen the bonds through growing, maintaining, and sharing herbs.",
+      "This project explores growing herbs can foster a more sustainable and socially connected community. The final design is a modular self-sustaining herb pot, encouraging students to reduce waste and strengthen the bonds through growing, maintaining, and sharing herbs.",
+    "project.1.extra":
+      "Excess food waste is a big challenge for everyone who lives alone. At the same time, for students living in an international student accommodation, trying to connect with flatmates from diverse cultures is essential and challenging.",
     "project.2.title": "A Traveller's Living Room",
     "project.2.subtitle": "A Lighting Support Exploring the Boundary Between Home and Public Space.",
     "project.2.description":
@@ -74,7 +76,9 @@ const translations = {
     "project.1.title": "Grow-Together",
     "project.1.subtitle": "一款减少浪费并鼓励社区分享的模块化香草种植盆。",
     "project.1.description":
-      "食物浪费是独居群体面临的一大挑战。与此同时，对于住在国际公寓的学生来说，与文化背景多元的室友建立联系既重要又充满挑战。本项目探索了种植香草如何促进社区的可持续性与社交连接。最终设计是一款模块化的自循环香草种植盆，鼓励学生通过种植、维护和分享香草来减少浪费并加强情感纽带。",
+      "本项目探索了种植香草如何促进社区的可持续性与社交连接。最终设计是一款模块化的自循环香草种植盆，鼓励学生通过种植、维护和分享香草来减少浪费并加强情感纽带。",
+    "project.1.extra":
+      "食物浪费是独居群体面临的一大挑战。与此同时，对于住在国际公寓的学生来说，与文化背景多元的室友建立联系既重要又充满挑战。",
     "project.2.title": "旅人的客厅",
     "project.2.subtitle": "一款探索家与公共空间边界的照明支撑。",
     "project.2.description":
