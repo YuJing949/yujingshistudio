@@ -17,6 +17,8 @@
 
 **2026-11-08 新增 Start over：** 账号页最后一行 `Start over`，确认后删除这个人的全部旅程、录音、收藏和账号（绑定的邮箱也解除），清空手机上的记录，重新从引导开始。需要在 Supabase **重新运行 `supabase/soundroute.sql`**（新增 `start_over_counts()` 和 `start_over()`）；没运行时点 Start over 会提示失败、不删任何东西。规格见 `design/blue-spec.md` §2.3 Start over。
 
+**2026-11-09 已上线：** `v2`（到 `597dc61c`，含 Start over）合并到 `main`，正式站 https://soundroute.yujingshistudio.com 已部署，线上 `app.js` 与该提交一致。正式站和测试站共用一个 Supabase 项目，`soundroute.sql` 需要已重新运行，Start over 才能用。之后的改动照旧先在 `v2` 上做、在测试站测。
+
 **Blue 版还没做的：** 地点名（反向地理编码）没接，详情页只显示时间和时长；City 里“Show in City”按钮没做；深色模式不跟随（规格里定为只做浅色）。
 
 ## 1. 项目是什么
