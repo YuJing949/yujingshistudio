@@ -193,7 +193,7 @@ function ProjectDetail() {
   }, []);
 
   // 打开某个项目时滚到它。上面项目的图片陆续加载会把它往下推，
-  // 所以前 3 秒里每当高度变了就再对齐一次；用户自己一滚动就停止。
+  // 所以在所有图片加载完之前（最多 10 秒），每当高度变了就再对齐一次；用户自己一滚动就停止。
   useEffect(() => {
     if (!id) return;
     const element = document.querySelector(`[data-project-id="${id}"]`);
@@ -208,10 +208,22 @@ function ProjectDetail() {
     const first = window.setTimeout(align, 100);
     const observer = new ResizeObserver(align);
     observer.observe(document.body);
-    const end = window.setTimeout(() => {
+    const finish = () => {
+      align();
       stop();
       observer.disconnect();
-    }, 3000);
+      window.clearInterval(check);
+    };
+    const end = window.setTimeout(finish, 10000);
+    // 所有图片都加载完、并稳定一会儿后结束
+    let settled = 0;
+    const check = window.setInterval(() => {
+      const imgs = Array.from(document.querySelectorAll<HTMLImageElement>("main img"));
+      const videos = Array.from(document.querySelectorAll<HTMLVideoElement>("main video"));
+      const ready = imgs.every((img) => img.complete) && videos.every((v) => v.readyState >= 1);
+      settled = ready ? settled + 1 : 0;
+      if (settled >= 2) finish();
+    }, 400);
     window.addEventListener("wheel", stop, { passive: true });
     window.addEventListener("touchstart", stop, { passive: true });
     window.addEventListener("keydown", stop);
@@ -220,6 +232,7 @@ function ProjectDetail() {
       observer.disconnect();
       window.clearTimeout(first);
       window.clearTimeout(end);
+      window.clearInterval(check);
       window.removeEventListener("wheel", stop);
       window.removeEventListener("touchstart", stop);
       window.removeEventListener("keydown", stop);
@@ -249,7 +262,7 @@ function ProjectDetail() {
         </div>
       )}
 
-      <main className="px-3 lg:px-5 pt-[88px] lg:pt-[120px] pb-20 lg:pb-40 flex flex-col gap-24 lg:gap-40">
+      <main style={{ overflowAnchor: "none" }} className="px-3 lg:px-5 pt-[88px] lg:pt-[120px] pb-20 lg:pb-40 flex flex-col gap-24 lg:gap-40">
         {PROJECT_ORDER.map((projectId) => (
           <article key={projectId} data-project-id={projectId} className="flex flex-col gap-3 lg:gap-5 scroll-mt-16">
             <ProjectHeader id={projectId} />
